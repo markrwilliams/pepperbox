@@ -1,4 +1,7 @@
 def restrict():
+    import os
+    if os.environ.get('UNRESTRICT'):
+        return
     import sys
     import resource
     import spyce
@@ -10,7 +13,8 @@ def restrict():
                            spyce.CAP_SEEK,
                            spyce.CAP_MMAP_RX,
                            spyce.CAP_MMAP,
-                           spyce.CAP_FCNTL])
+                           spyce.CAP_FCNTL,
+                           spyce.CAP_FSTATFS])
 
     def limitResource(thing, soft, hard=None):
         hard = hard or soft
@@ -23,12 +27,8 @@ def restrict():
     limitResource(resource.RLIMIT_MEMLOCK, 0)
     limitResource(resource.RLIMIT_NPROC, 0)
 
-    pepperbox.loader.install(rights, preimports=('random',))
+    pepperbox.loader.install(rights=None, preimports=('random',))
     spyce.enterCapabilityMode()
 
     for module in ('resource', 'spyce', 'pepperbox'):
         del sys.modules[module]
-
-
-restrict()
-del restrict

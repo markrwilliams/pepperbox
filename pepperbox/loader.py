@@ -1,4 +1,5 @@
 # cribbed from fsnix's source and http://pymotw.com/2/sys/imports.html
+import pprint
 import gc
 import errno
 import imp
@@ -7,7 +8,8 @@ import sys
 import struct
 import marshal
 from pepperbox._ffi import fdlopen, RTLD_NOW, dlsym, callable_with_gil
-from pepperbox.support import opendir, fopendirat
+from pepperbox.support import opendir
+import spyce as S
 
 
 class OpenatLoader(object):
@@ -192,7 +194,6 @@ class OpenatFinder(object):
                 loader = TryPycThenPyOpenatLoader
             elif kind == imp.PY_COMPILED:
                 loader = PyCompiledOpenatLoader
-
             return loader(self.path_entry, dirobj, relpath, is_package)
 
     def find_module(self, fullname, path=None):
@@ -201,11 +202,10 @@ class OpenatFinder(object):
             for p in path:
                 if not p.startswith(self.path_entry):
                     return None
-                path = p.replace(self.path_entry, '')
+                p = p.replace(self.path_entry, '')
                 if p.startswith('/'):
                     p = p[1:]
-
-                dirobj = fopendirat(self.directory.fileno(), p)
+                dirobj = self.directory.opendir(p)
                 dirobjs.append(dirobj)
         else:
             dirobjs = [self.directory]
@@ -214,7 +214,6 @@ class OpenatFinder(object):
             loader = self._find_loader(dirobj, fullname)
             if loader:
                 return loader
-
 
 
 def install(rights, preimports=()):
