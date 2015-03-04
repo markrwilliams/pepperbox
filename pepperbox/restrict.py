@@ -1,7 +1,4 @@
 def restrict():
-    import os
-    if os.environ.get('UNRESTRICT'):
-        return
     import sys
     import resource
     import spyce
@@ -27,7 +24,7 @@ def restrict():
     limitResource(resource.RLIMIT_MEMLOCK, 0)
     limitResource(resource.RLIMIT_NPROC, 0)
 
-    pepperbox.loader.install(rights=None, preimports=('random',))
+    pepperbox.loader.install(rights, preimports=('random',))
     spyce.enterCapabilityMode()
 
     for module in ('resource', 'spyce', 'pepperbox'):
