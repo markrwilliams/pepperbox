@@ -5,8 +5,10 @@ import imp
 import os
 from fsnix import fs, util
 import sys
+import struct
 import ctypes
 import cffi
+import marshal
 
 
 ffi = cffi.FFI()
@@ -155,7 +157,70 @@ class PyOpenatLoader(OpenatLoader):
 
 
 class PyCompiledOpenatLoader(OpenatLoader):
-    pass
+    # native order
+    MARSHAL_LONG = struct.Struct('I')
+    (MAGIC,) = MARSHAL_LONG.unpack(imp.get_magic())
+
+    fileobj = None
+
+    def _read_marshal_long(self, f):
+        try:
+            return self.MARSHAL_LONG.unpack(f.read(self.MARSHAL_LONG.size))[0]
+        except struct.error:
+            return None
+
+    def _ensure_mtime_ok(self, mtime):
+        uncompiled = self.relpath.replace('.pyc', '.py')
+        try:
+            stat = self.dirobj.lstat(uncompiled)
+        except OSError as e:
+            if e.errno != errno.ENOENT:
+                raise
+        else:
+            # compare only lowest 4 bytes
+            if int(stat.st_mtime) & 0xFFFFFFFF != mtime:
+                raise ImportError
+
+    def load_module(self, fullname):
+        try:
+            with self.dirobj.open(self.relpath) as f:
+                self.fileobj = f
+                magic = self._read_marshal_long(f)
+                if magic is None or magic != self.MAGIC:
+                    raise ImportError('Bad magic number in '
+                                      '{}'.format(self.relpath))
+                mtime = self._read_marshal_long(f)
+                if mtime is None:
+                    raise EOFError
+
+                self._ensure_mtime_ok(mtime)
+                return super(PyCompiledOpenatLoader,
+                             self).load_module(fullname)
+        except OSError as e:
+            if e.errno != errno.ENOENT:
+                raise
+            raise ImportError(e)
+
+    def _populate_module(self, module, fullname, shortname):
+        exec marshal.load(self.fileobj) in module.__dict__
+        return module
+
+
+class TryPycThenPyOpenatLoader(object):
+
+    def __init__(self, *args, **kwargs):
+        self.pyc_loader = PyCompiledOpenatLoader(*args, **kwargs)
+        self.py_loader = PyOpenatLoader(*args, **kwargs)
+        self.pyc_loader.relpath = self.py_loader.relpath.replace('.py', '.pyc')
+
+    def __getattr__(self, attr):
+        return getattr(self.py_loader, attr)
+
+    def load_module(self, *args, **kwargs):
+        try:
+            return self.pyc_loader.load_module(*args, **kwargs)
+        except:
+            return self.py_loader.load_module(*args, **kwargs)
 
 
 class RTLDOpenatLoader(OpenatLoader):
@@ -229,11 +294,20 @@ class OpenatFinder(object):
             if kind == imp.C_EXTENSION:
                 loader = RTLDOpenatLoader
             elif kind == imp.PY_SOURCE:
-                loader = PyOpenatLoader
+                loader = TryPycThenPyOpenatLoader
             elif kind == imp.PY_COMPILED:
-                return None
+                loader = PyCompiledOpenatLoader
 
             return loader(self.path_entry, dirobj, relpath, is_package)
+
+
+def install(rights, preimports=('random',)):
+    for preimport in preimports:
+        __import__(preimport)
+
+    for entry in sys.path:
+        if os.path.isdir(entry):
+            sys.meta_path.append(OpenatFinder(entry, rights))
 
 
 def test():
@@ -244,13 +318,11 @@ def test():
     rights = Rights([CAP_READ, CAP_LOOKUP, CAP_FSTAT, CAP_SEEK,
                      CAP_MMAP_RX, CAP_MMAP, CAP_FCNTL])
 
-    for entry in sys.path:
-        if os.path.isdir(entry):
-            sys.meta_path.append(OpenatFinder(entry, rights))
-
+    install(rights)
     enterCapabilityMode()
 
     import mmap
+    import urllib2
 
 
 if __name__ == '__main__':
