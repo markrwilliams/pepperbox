@@ -1,5 +1,4 @@
 # cribbed from fsnix's source and http://pymotw.com/2/sys/imports.html
-import pprint
 import gc
 import errno
 import imp
@@ -9,7 +8,6 @@ import struct
 import marshal
 from pepperbox._ffi import fdlopen, RTLD_NOW, dlsym, callable_with_gil
 from pepperbox.support import opendir
-import spyce as S
 
 
 class OpenatLoader(object):
