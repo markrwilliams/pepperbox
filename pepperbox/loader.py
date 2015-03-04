@@ -36,9 +36,9 @@ class OpenatLoader(object):
 
     def load_module(self, fullname):
         if fullname in sys.modules:
-            return sys.modules[fullname]
-        module = imp.new_module(fullname)
-
+            module = sys.modules[fullname]
+        else:
+            module = imp.new_module(fullname)
         _, _, shortname = fullname.rpartition('.')
 
         module.__file__ = self.relpath

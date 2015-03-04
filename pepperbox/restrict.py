@@ -1,5 +1,5 @@
 def restrict():
-    import sys
+    import os
     import resource
     import spyce
     import pepperbox.loader
@@ -26,6 +26,3 @@ def restrict():
 
     pepperbox.loader.install(rights, preimports=('random',))
     spyce.enterCapabilityMode()
-
-    for module in ('resource', 'spyce', 'pepperbox'):
-        del sys.modules[module]
