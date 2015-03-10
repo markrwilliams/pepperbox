@@ -64,7 +64,7 @@ class PyOpenatLoader(OpenatLoader):
                 raise
             raise ImportError(e)
 
-        exec src in module.__dict__
+        exec(src, module.__dict__)
 
         return module
 
@@ -115,7 +115,7 @@ class PyCompiledOpenatLoader(OpenatLoader):
             raise ImportError(e)
 
     def _populate_module(self, module, fullname, shortname):
-        exec marshal.load(self.fileobj) in module.__dict__
+        exec(marshal.load(self.fileobj), module.__dict__)
         return module
 
 
