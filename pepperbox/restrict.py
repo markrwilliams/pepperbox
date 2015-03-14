@@ -1,6 +1,6 @@
 def restrict():
-    import os
     import resource
+    import termios
     import spyce
     import pepperbox.loader
 
@@ -11,7 +11,10 @@ def restrict():
                            spyce.CAP_MMAP_RX,
                            spyce.CAP_MMAP,
                            spyce.CAP_FCNTL,
+                           spyce.CAP_IOCTL,
                            spyce.CAP_FSTATFS])
+
+    ioctlRights = spyce.IoctlRights([termios.FIOCLEX])
 
     def limitResource(thing, soft, hard=None):
         hard = hard or soft
@@ -24,5 +27,6 @@ def restrict():
     limitResource(resource.RLIMIT_MEMLOCK, 0)
     limitResource(resource.RLIMIT_NPROC, 0)
 
-    pepperbox.loader.install(rights, preimports=('random',))
+    pepperbox.loader.install(rights=(rights, ioctlRights),
+                             preimports=('random',))
     spyce.enterCapabilityMode()

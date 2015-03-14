@@ -59,9 +59,7 @@ class PyOpenatLoader(OpenatLoader):
             with self.dirobj.open(self.relpath) as f:
                 module.__file__ = f.name
                 src = f.read()
-        except OSError as e:
-            if e.errno != errno.ENOENT:
-                raise
+        except Exception as e:
             raise ImportError(e)
 
         exec(src, module.__dict__)
@@ -86,9 +84,8 @@ class PyCompiledOpenatLoader(OpenatLoader):
         uncompiled = self.relpath.replace('.pyc', '.py')
         try:
             stat = self.dirobj.lstat(uncompiled)
-        except OSError as e:
-            if e.errno != errno.ENOENT:
-                raise
+        except FileNotFoundError:
+            pass
         else:
             # compare only lowest 4 bytes
             if int(stat.st_mtime) & 0xFFFFFFFF != mtime:
@@ -109,9 +106,7 @@ class PyCompiledOpenatLoader(OpenatLoader):
                 self._ensure_mtime_ok(mtime)
                 return super(PyCompiledOpenatLoader,
                              self).load_module(fullname)
-        except OSError as e:
-            if e.errno != errno.ENOENT:
-                raise
+        except FileNotFoundError as e:
             raise ImportError(e)
 
     def _populate_module(self, module, fullname, shortname):
@@ -155,14 +150,15 @@ class RTLDOpenatLoader(OpenatLoader):
 class OpenatFinder(object):
     SUFFIXES = tuple(imp.get_suffixes())
 
-    def __init__(self, path_entry, rights=None):
+    def __init__(self, path_entry, rights=()):
         if not os.path.isdir(path_entry):
             raise ValueError('{!r} is not a path entry'.format(path_entry))
 
         self.path_entry = path_entry
         self.directory = opendir(path_entry)
-        if rights is not None:
-            rights.limitFile(self.directory)
+
+        for rightsObj in rights:
+            rightsObj.limitFile(self.directory)
 
     def __call__(self, path_entry):
         if self.path_entry != path_entry:
@@ -218,6 +214,7 @@ def install(rights, preimports=()):
     for preimport in preimports:
         __import__(preimport)
 
-    for entry in sys.path:
-        if os.path.isdir(entry):
-            sys.meta_path.append(OpenatFinder(entry, rights))
+    meta_path = [OpenatFinder(entry, rights)
+                 for entry in sys.path
+                 if os.path.isdir(entry)]
+    sys.meta_path = meta_path + sys.meta_path

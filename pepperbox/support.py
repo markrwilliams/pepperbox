@@ -1,6 +1,5 @@
 import errno
 import os
-import functools
 
 
 class directory(object):
