@@ -134,15 +134,15 @@ class TryPycThenPyOpenatLoader(object):
 class RTLDOpenatLoader(OpenatLoader):
 
     def _populate_module(self, module, fullname, shortname):
+        shortname = shortname.encode('ascii')
         gc.disable()
         try:
             with self.dirobj.open(self.relpath) as so:
                 so_fd = so.fileno()
                 loaded_so = fdlopen(so_fd, RTLD_NOW)
-                initmodule_pointer = dlsym(loaded_so, 'init%s' % shortname)
+                initmodule_pointer = dlsym(loaded_so, b'PyInit_' + shortname)
                 initmodule = callable_with_gil(initmodule_pointer)
-                initmodule()
-                return sys.modules[fullname]
+                return initmodule()
         finally:
             gc.enable()
 

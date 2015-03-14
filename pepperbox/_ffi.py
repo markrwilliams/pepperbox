@@ -51,7 +51,7 @@ def dlsym(loaded_so, symname):
     return void_ptr
 
 
-INITMODULEFUNC = ctypes.PYFUNCTYPE(None)
+INITMODULEFUNC = ctypes.PYFUNCTYPE(ctypes.py_object)
 
 
 def callable_with_gil(void_ptr):

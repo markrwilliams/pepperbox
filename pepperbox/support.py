@@ -1,4 +1,5 @@
 import errno
+import functools
 import os
 
 
@@ -32,8 +33,8 @@ class directory(object):
 
     def opendir(self, path):
         return _opendir(path,
-                        func=os.partial(os.open,
-                                        dir_fd=self.fileno()))
+                        func=functools.partial(os.open,
+                                               dir_fd=self.fileno()))
 
     def lstat(self, path):
         return os.stat(path, dir_fd=self.fileno())
