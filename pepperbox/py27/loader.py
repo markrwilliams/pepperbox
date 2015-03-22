@@ -48,7 +48,7 @@ class OpenatLoader(object):
         module.__package__ = '.'.join(fullname.split('.')[:-1])
 
         if self._is_package:
-            module.__path__ = [self.path_entry]
+            module.__path__ = [os.path.join(self.path_entry, shortname)]
 
         module = self._populate_module(module, fullname, shortname)
         sys.modules[fullname] = module
