@@ -85,12 +85,13 @@ class OpenatFileFinder(BaseOpenatFileFinder, MetaPathFinder):
             return builtin_spec
 
         is_namespace = False
-        tail_module = fullname.rpartition('.')[2]
+        parts = fullname.split('.')
+        tail_module = parts[-1]
 
         # Check if the module is the name of a directory (and thus a package).
         for dirobj in self.dirobjs_from_path(path):
             if dirobj.isdir(tail_module):
-                base_path = os.path.join(self.path, tail_module)
+                base_path = os.path.join(self.path, *parts)
                 for suffix, loader_class in self._loaders:
                     init_filename = '__init__' + suffix
                     full_path = os.path.join(base_path, init_filename)
