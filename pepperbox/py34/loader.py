@@ -26,7 +26,7 @@ class OpenatLoader(object):
 class OpenatSourceFileLoader(OpenatLoader, SourceLoader):
 
     def path_stats(self, path):
-        stats = self.dirobj.lstat(path)
+        stats = self.dirobj.stat(path)
         return {'mtime': stats.st_mtime, 'size': stats.st_size}
 
     def get_data(self, path):
