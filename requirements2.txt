@@ -1,0 +1,4 @@
+cffi==0.9.1
+pycparser==2.10
+spyce
+fsnix
