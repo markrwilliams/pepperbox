@@ -9,7 +9,9 @@ else:
 
 
 def install(rights, preimports=()):
+    for preimport in preimports:
+        __import__(preimport)
     meta_path = [OpenatFileFinder(entry, rights)
                  for entry in sys.path
-                 if os.path.isdir(entry)]
+                 if entry and os.path.isdir(entry)]
     sys.meta_path = meta_path
