@@ -20,9 +20,9 @@ class BadMode(Exception):
 
 class DirectoryFD(object):
 
-    def __init__(self, path):
+    def __init__(self, path, dirobj=None):
         self.name = path
-        self._dirobj = support.opendir(path)
+        self._dirobj = dirobj or support.opendir(path)
         self.fileno = self._dirobj.fileno
 
     def handle_abspath(self, path):
@@ -49,7 +49,9 @@ class DirectoryFD(object):
 
     def opendir(self, path):
         path = self.handle_abspath(path)
-        return support.fdopendir(self._dirobj.fileno(), path)
+        return DirectoryFD(os.path.join(self.name, path),
+                           support.fdopendir(self._dirobj.fileno(),
+                                             path))
 
     def stat(self, path):
         path = self.handle_abspath(path)
