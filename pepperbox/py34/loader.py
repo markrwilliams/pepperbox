@@ -56,6 +56,11 @@ class OpenatExtensionFileLoader(OpenatLoader, ExtensionFileLoader):
                 initmodule_pointer = dlsym(loaded_so, b'PyInit_' + shortname)
                 initmodule = callable_with_gil(initmodule_pointer)
                 m = initmodule()
+
+                m_ptr = ctypes.py_object(m)
+                m_def = ctypes.pythonapi.PyModule_GetDef(m_ptr)
+                ctypes.pythonapi.PyState_AddModule(m_ptr, m_def)
+
                 m.__file__ = self.path
                 return m
         finally:
