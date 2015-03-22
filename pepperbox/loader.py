@@ -1,220 +1,142 @@
-# cribbed from fsnix's source and http://pymotw.com/2/sys/imports.html
 import gc
-import errno
-import imp
+import _imp
+from importlib.util import spec_from_file_location
+from importlib.abc import SourceLoader, MetaPathFinder
+from importlib.machinery import (ModuleSpec,
+                                 ExtensionFileLoader,
+                                 SOURCE_SUFFIXES, BYTECODE_SUFFIXES,
+                                 BuiltinImporter)
 import os
 import sys
-import struct
-import marshal
 from pepperbox._ffi import fdlopen, RTLD_NOW, dlsym, callable_with_gil
 from pepperbox.support import opendir
 
 
 class OpenatLoader(object):
-    def __init__(self, path_entry, dirobj, relpath, is_package):
-        self.path_entry = path_entry
+    def __init__(self, fullname, path, dirobj):
+        self.fullname = fullname
+        self.path = path
         self.dirobj = dirobj
-        self.relpath = relpath
-        self._is_package = is_package
 
-    def get_data(self, fullname):
-        raise IOError
 
-    def is_package(self, fullname):
-        return self._is_package
+class OpenatSourceFileLoader(OpenatLoader, SourceLoader):
 
-    def get_code(self, fullname):
-        raise IOError
+    def path_stats(self, path):
+        stats = self.dirobj.lstat(path)
+        return {'mtime': stats.st_mtime, 'size': stats.st_size}
+
+    def get_data(self, path):
+        with self.dirobj.open(path, 'rb') as f:
+            return f.read()
+
+    def get_filename(self, path):
+        return self.path
+
+
+class OpenatSourcelessFileLoader(OpenatSourceFileLoader):
 
     def get_source(self, fullname):
-        raise IOError
-
-    def _populate_module(self, module, fullname):
-        return module
-
-    def load_module(self, fullname):
-        if fullname in sys.modules:
-            module = sys.modules[fullname]
-        else:
-            module = imp.new_module(fullname)
-        _, _, shortname = fullname.rpartition('.')
-
-        module.__file__ = self.relpath
-        module.__name__ = fullname
-        module.__loader__ = self
-        module.__package__ = '.'.join(fullname.split('.')[:-1])
-
-        if self._is_package:
-            module.__path__ = [self.path_entry]
-
-        module = self._populate_module(module, fullname, shortname)
-        sys.modules[fullname] = module
-        return module
+        return None
 
 
-class PyOpenatLoader(OpenatLoader):
+class OpenatExtensionFileLoader(OpenatLoader, ExtensionFileLoader):
 
-    def _populate_module(self, module, fullname, shortname):
-        try:
-            with self.dirobj.open(self.relpath) as f:
-                module.__file__ = f.name
-                src = f.read()
-        except Exception as e:
-            raise ImportError(e)
-
-        exec(src, module.__dict__)
-
-        return module
-
-
-class PyCompiledOpenatLoader(OpenatLoader):
-    # native order
-    MARSHAL_LONG = struct.Struct('I')
-    (MAGIC,) = MARSHAL_LONG.unpack(imp.get_magic())
-
-    fileobj = None
-
-    def _read_marshal_long(self, f):
-        try:
-            return self.MARSHAL_LONG.unpack(f.read(self.MARSHAL_LONG.size))[0]
-        except struct.error:
-            return None
-
-    def _ensure_mtime_ok(self, mtime):
-        uncompiled = self.relpath.replace('.pyc', '.py')
-        try:
-            stat = self.dirobj.lstat(uncompiled)
-        except FileNotFoundError:
-            pass
-        else:
-            # compare only lowest 4 bytes
-            if int(stat.st_mtime) & 0xFFFFFFFF != mtime:
-                raise ImportError
-
-    def load_module(self, fullname):
-        try:
-            with self.dirobj.open(self.relpath) as f:
-                self.fileobj = f
-                magic = self._read_marshal_long(f)
-                if magic is None or magic != self.MAGIC:
-                    raise ImportError('Bad magic number in '
-                                      '{}'.format(self.relpath))
-                mtime = self._read_marshal_long(f)
-                if mtime is None:
-                    raise EOFError
-
-                self._ensure_mtime_ok(mtime)
-                return super(PyCompiledOpenatLoader,
-                             self).load_module(fullname)
-        except FileNotFoundError as e:
-            raise ImportError(e)
-
-    def _populate_module(self, module, fullname, shortname):
-        exec(marshal.load(self.fileobj), module.__dict__)
-        return module
-
-
-class TryPycThenPyOpenatLoader(object):
-
-    def __init__(self, *args, **kwargs):
-        self.pyc_loader = PyCompiledOpenatLoader(*args, **kwargs)
-        self.py_loader = PyOpenatLoader(*args, **kwargs)
-        self.pyc_loader.relpath = self.py_loader.relpath.replace('.py', '.pyc')
-
-    def __getattr__(self, attr):
-        return getattr(self.py_loader, attr)
-
-    def load_module(self, *args, **kwargs):
-        try:
-            return self.pyc_loader.load_module(*args, **kwargs)
-        except:
-            return self.py_loader.load_module(*args, **kwargs)
-
-
-class RTLDOpenatLoader(OpenatLoader):
-
-    def _populate_module(self, module, fullname, shortname):
+    def create_module(self, spec):
+        _, _, shortname = spec.name.rpartition('.')
         shortname = shortname.encode('ascii')
         gc.disable()
         try:
-            with self.dirobj.open(self.relpath) as so:
+            with self.dirobj.open(self.path) as so:
                 so_fd = so.fileno()
                 loaded_so = fdlopen(so_fd, RTLD_NOW)
                 initmodule_pointer = dlsym(loaded_so, b'PyInit_' + shortname)
                 initmodule = callable_with_gil(initmodule_pointer)
-                return initmodule()
+                m = initmodule()
+                m.__file__ = self.path
+                return m
         finally:
             gc.enable()
 
+    def exec_module(self, module):
+        return module
 
-class OpenatFinder(object):
-    SUFFIXES = tuple(imp.get_suffixes())
 
-    def __init__(self, path_entry, rights=()):
-        if not os.path.isdir(path_entry):
-            raise ValueError('{!r} is not a path entry'.format(path_entry))
+class OpenatFileFinder(MetaPathFinder):
 
-        self.path_entry = path_entry
-        self.directory = opendir(path_entry)
-
+    def __init__(self, path, rights=()):
+        self.path = path
+        self.dirobj = opendir(path)
         for rightsObj in rights:
-            rightsObj.limitFile(self.directory)
+            rightsObj.limitFile(self.dirobj)
 
-    def __call__(self, path_entry):
-        if self.path_entry != path_entry:
-            raise ImportError
+        loaders = [(OpenatExtensionFileLoader, _imp.extension_suffixes()),
+                   (OpenatSourceFileLoader, SOURCE_SUFFIXES),
+                   (OpenatSourcelessFileLoader, BYTECODE_SUFFIXES)]
+        self._loaders = [(suffix, loader)
+                         for loader, suffixes in loaders
+                         for suffix in suffixes]
 
-    def __str__(self):
-        return '<{} for {}">'.format(self.__class__.__name__, self.path_entry)
+    def find_spec(self, fullname, path=None, target=None):
+        """Try to find a loader for the specified module, or the namespace
+        package portions. Returns (loader, list-of-portions)."""
+        builtin_spec = BuiltinImporter.find_spec(fullname, path, target)
+        if builtin_spec:
+            return builtin_spec
+        is_namespace = False
+        tail_module = fullname.rpartition('.')[2]
 
-    def _find_loader(self, dirobj, fullname):
-        _, _, module = fullname.rpartition('.')
-
-        if imp.is_builtin(fullname):
-            return None
-
-        for suffix, mode, kind in self.SUFFIXES:
-            for additional, is_package in [((), False),
-                                           (('__init__',), True)]:
-                relpath = os.path.join(module, *additional) + suffix
-                if dirobj.exists(relpath):
-                    break
-            else:
-                continue
-
-            if kind == imp.C_EXTENSION:
-                loader = RTLDOpenatLoader
-            elif kind == imp.PY_SOURCE:
-                loader = TryPycThenPyOpenatLoader
-            elif kind == imp.PY_COMPILED:
-                loader = PyCompiledOpenatLoader
-            return loader(self.path_entry, dirobj, relpath, is_package)
-
-    def find_module(self, fullname, path=None):
         if path:
             dirobjs = []
             for p in path:
-                if not p.startswith(self.path_entry):
-                    return None
-                p = p.replace(self.path_entry, '')
-                if p.startswith('/'):
-                    p = p[1:]
-                dirobj = self.directory.opendir(p)
+                try:
+                    dirobj = self.dirobj.opendir(p)
+                except ValueError:
+                    return
                 dirobjs.append(dirobj)
         else:
-            dirobjs = [self.directory]
+            dirobjs = [self.dirobj]
 
+        # Check if the module is the name of a directory (and thus a package).
         for dirobj in dirobjs:
-            loader = self._find_loader(dirobj, fullname)
-            if loader:
-                return loader
+            if dirobj.isdir(tail_module):
+                base_path = os.path.join(self.path, tail_module)
+                for suffix, loader_class in self._loaders:
+                    init_filename = '__init__' + suffix
+                    full_path = os.path.join(base_path, init_filename)
+                    if dirobj.isfile(full_path):
+                        _loader = loader_class(fullname, full_path,
+                                               dirobj)
+                        return spec_from_file_location(
+                            fullname, full_path,
+                            loader=_loader,
+                            submodule_search_locations=[base_path])
+                else:
+                    # If a namespace package, return the path if we don't
+                    #  find a module in the next section.
+                    is_namespace = dirobj.isdir(tail_module)
+            # Check for a file w/ a proper suffix exists.
+            for suffix, loader_class in self._loaders:
+                fn = tail_module + suffix
+                full_path = os.path.join(dirobj.name, fn)
+                if dirobj.isfile(fn):
+                    _loader = loader_class(fullname, full_path, dirobj)
+                    return spec_from_file_location(
+                        fullname, full_path,
+                        loader=_loader,
+                        submodule_search_locations=None)
+
+            if is_namespace:
+                spec = ModuleSpec(fullname, None)
+                spec.submodule_search_locations = [base_path]
+                return spec
+        return None
 
 
 def install(rights, preimports=()):
     for preimport in preimports:
         __import__(preimport)
 
-    meta_path = [OpenatFinder(entry, rights)
+    meta_path = [OpenatFileFinder(entry, rights)
                  for entry in sys.path
                  if os.path.isdir(entry)]
-    sys.meta_path = meta_path + sys.meta_path
+    sys.meta_path = meta_path

@@ -1,6 +1,7 @@
 import errno
 import functools
 import os
+import stat
 
 
 class directory(object):
@@ -27,22 +28,51 @@ class directory(object):
     def _opener(self, path, flags):
         return os.open(path, flags, dir_fd=self.fileno())
 
+    def handle_abspath(self, path):
+        if not path.startswith('/'):
+            return path
+
+        if not path.startswith(self.name):
+            raise ValueError("path {} not a child of {}".format(path,
+                                                                self.name))
+        path = path.replace(self.name, '')
+        if path.startswith('/'):
+            path = path[1:]
+        return path
+
     def open(self, path, mode='r'):
         assert not set(mode) & set('wa+')
+        path = self.handle_abspath(path)
         return open(path, mode=mode, opener=self._opener)
 
     def opendir(self, path):
-        return _opendir(path,
+        return _opendir(self.handle_abspath(path),
                         func=functools.partial(os.open,
-                                               dir_fd=self.fileno()))
+                                               dir_fd=self.fileno()),
+                        abspath=path)
 
     def lstat(self, path):
+        path = self.handle_abspath(path)
         return os.stat(path, dir_fd=self.fileno())
+
+    def isfile(self, path):
+        try:
+            st = self.lstat(path)
+        except (OSError, ValueError):
+            return False
+        return stat.S_ISREG(st.st_mode)
+
+    def isdir(self, path):
+        try:
+            st = self.lstat(path)
+        except (OSError, ValueError):
+            return False
+        return stat.S_ISDIR(st.st_mode)
 
     def exists(self, path):
         try:
             self.lstat(path)
-        except OSError as e:
+        except (OSError, ValueError) as e:
             if e.errno == errno.ENOENT:
                 return False
             raise
@@ -72,15 +102,15 @@ class directory(object):
         """Returns handle name/path"""
         return self._name
 
-    def listdir(self, _fs=None):
+    def listdir(self,):
         """Return directory contents in a list for current handle.
         """
         return os.listdir(self._dirfd)
 
 
-def _opendir(path, func):
+def _opendir(path, func, abspath=None):
     flags = (os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
-    return directory(func(path, flags), path)
+    return directory(func(path, flags), abspath or path)
 
 
 def opendir(path):
