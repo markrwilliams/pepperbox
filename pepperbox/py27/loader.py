@@ -40,17 +40,19 @@ class OpenatLoader(object):
             module = sys.modules[fullname]
         else:
             module = imp.new_module(fullname)
-        parts = fullname.split('.')
-        shortname = parts[-1]
-        path = os.path.join(self.path_entry, *parts)
+        components = fullname.split('.')
+        package_parts = components[:-1]
+        module_name = components[-1]
 
-        module.__file__ = os.path.join(path, self.relpath)
+        module.__file__ = os.path.join(self.path_entry,
+                                       *(package_parts + [self.relpath]))
         module.__name__ = fullname
+        module.__package__ = '.'.join(components[:-1])
 
         if self._is_package:
-            module.__path__ = [path]
+            module.__path__ = [os.path.join(self.path_entry, *components)]
 
-        module = self._populate_module(module, fullname, shortname)
+        module = self._populate_module(module, fullname, module_name)
         sys.modules[fullname] = module
         return module
 
