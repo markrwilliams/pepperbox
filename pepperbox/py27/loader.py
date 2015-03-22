@@ -88,7 +88,7 @@ class PyCompiledOpenatLoader(OpenatLoader):
     def _ensure_mtime_ok(self, mtime):
         uncompiled = self.relpath.replace('.pyc', '.py')
         try:
-            stat = self.dirobj.lstat(uncompiled)
+            stat = self.dirobj.stat(uncompiled)
         except OSError as e:
             if e.errno != errno.ENOENT:
                 raise
