@@ -1,5 +1,4 @@
 import cffi
-import ctypes
 
 
 ffi = cffi.FFI()
@@ -51,9 +50,8 @@ def dlsym(loaded_so, symname):
     return void_ptr
 
 
-INITMODULEFUNC = ctypes.PYFUNCTYPE(ctypes.py_object)
-
-
-def callable_with_gil(void_ptr):
-    addr = lib.addrof(void_ptr)
-    return INITMODULEFUNC(addr)
+def make_callable_with_gil(initmodulefunc):
+    def callable_with_gil(void_ptr):
+        addr = lib.addrof(void_ptr)
+        return initmodulefunc(addr)
+    return callable_with_gil
