@@ -31,7 +31,7 @@ class _DirectoryFD:
 
     @property
     def closed(self):
-        return self.opened
+        return not self.opened
 
 
 def fd_for_dir(path, dir_fd=None):

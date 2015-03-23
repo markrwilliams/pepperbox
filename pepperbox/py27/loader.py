@@ -20,20 +20,11 @@ class OpenatLoader(object):
         self.relpath = relpath
         self._is_package = is_package
 
-    def get_data(self, fullname):
-        raise IOError
-
     def is_package(self, fullname):
         return self._is_package
 
-    def get_code(self, fullname):
-        raise IOError
-
-    def get_source(self, fullname):
-        raise IOError
-
-    def _populate_module(self, module, fullname):
-        return module
+    def _populate_module(self, module, fullname):  # pragma: no cover
+        raise NotImplementedError
 
     def load_module(self, fullname):
         if fullname in sys.modules:

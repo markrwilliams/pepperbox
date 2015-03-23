@@ -15,6 +15,7 @@ if __name__ == '__main__':
           version='0.0.1',
           zip_safe=False,
           install_requires=requirements,
+          include_package_data=True,
           packages=find_packages(),
           ext_package='pepperbox',
           ext_modules=[ffi.verifier.get_extension()],

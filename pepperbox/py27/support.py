@@ -17,10 +17,15 @@ class file_with_name:
 class _DirectoryFD(util.directory):
 
     def open(self, path, mode='r'):
-        assert not set(mode) & set('wa+')
         fd = fs.openat(self.fileno(), path, os.O_RDONLY)
         name = os.path.join(self.name, path)
         return file_with_name(os.fdopen(fd, mode), name)
+
+    def listdir(self):
+        # TODO: fsnix calls rewinddir prior to readdr'ing its way through
+        # the directory -- this results in duplicate listings on freebsd!
+        listing = super(_DirectoryFD, self).listdir()
+        return listing[:len(listing) / 2]
 
     def stat(self, path):
         return fs.fstatat(self.fileno(), path)

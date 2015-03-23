@@ -37,10 +37,10 @@ class DirectoryFD(object):
         if os.path.isabs(path):
             path = path[1:]
 
-        return path
+        return path or '.'
 
     def open(self, path, mode='rb'):
-        bad = {'wa+'} & set(mode)
+        bad = set('wa+') & set(mode)
         if bad:
             raise BadMode('invalid mode components {!r}'.format(bad))
 
@@ -83,12 +83,15 @@ class DirectoryFD(object):
     def __enter__(self):
         return self
 
-    def __exit__(self):
-        self._dirobj.close()
+    def __exit__(self, *exc_info):
+        self.close()
 
     @property
     def closed(self):
         return self._dirobj.closed
+
+    def __del__(self):
+        self.close()
 
 
 class BaseOpenatFileFinder(object):
