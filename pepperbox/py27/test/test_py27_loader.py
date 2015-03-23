@@ -3,10 +3,8 @@ import sys
 import os
 from pepperbox.support import DirectoryFD
 
-
-def py27(f):
-    return pytest.mark.skipif(sys.version_info.major > 2,
-                              reason='only for Python 2.7')(f)
+pytestmark = pytest.mark.skipif(sys.version_info.major > 2,
+                                reason='only for Python 2.7')
 
 
 @pytest.fixture
@@ -15,7 +13,6 @@ def loader():
     return loader
 
 
-@py27
 def test_PyOpenatLoader_module_succeeds(loader):
     test_fn = os.path.join(os.path.dirname(__file__), 'no_pyc.py')
     test_fn_bytecode = test_fn.replace('.py', '.pyc')
@@ -38,7 +35,6 @@ def test_PyOpenatLoader_module_succeeds(loader):
         assert not os.path.exists(test_fn_bytecode)
 
 
-@py27
 def test_PyOpenatLoader_inaccessible_module_fails(tmpdir, loader):
     with pytest.raises(ImportError):
         missing_pol = loader.PyOpenatLoader(str(tmpdir),
