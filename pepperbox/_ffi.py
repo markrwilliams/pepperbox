@@ -27,7 +27,8 @@ lib = ffi.verify('''
 
 
 uintptr_t
-addrof(void * p){
+addrof(void * p)
+{
     return (uintptr_t)p;
 }
 ''',
