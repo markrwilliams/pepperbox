@@ -19,10 +19,8 @@ def test_PyOpenatLoader_module_succeeds(loader):
 
     head = test_fn
     args = ()
-    while head != os.path.sep:
+    while head and head != os.path.sep:
         head, new_tail = os.path.split(head)
-        if not head:
-            break
 
         args = (new_tail,) + args
         tail = os.path.join(*args)
