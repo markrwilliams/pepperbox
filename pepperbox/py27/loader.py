@@ -34,7 +34,6 @@ class OpenatLoader(object):
         components = fullname.split('.')
         package_parts = components[:-1]
         module_name = components[-1]
-
         module.__file__ = os.path.join(self.path_entry,
                                        *(package_parts + [self.relpath]))
         module.__name__ = fullname
@@ -45,6 +44,7 @@ class OpenatLoader(object):
 
         module = self._populate_module(module, fullname, module_name)
         sys.modules[fullname] = module
+
         return module
 
 
@@ -53,7 +53,6 @@ class PyOpenatLoader(OpenatLoader):
     def _populate_module(self, module, fullname, shortname):
         try:
             with self.dirobj.open(self.relpath) as f:
-                module.__file__ = f.name
                 src = f.read()
         except OSError as e:
             if e.errno != errno.ENOENT:

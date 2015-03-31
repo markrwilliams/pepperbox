@@ -4,22 +4,12 @@ import os
 from fsnix import fs, util
 
 
-class file_with_name:
-
-    def __init__(self, fileinst, name):
-        self.fileinst = fileinst
-        self.name = name
-
-    def __getattr__(self, attr):
-        return getattr(self.fileinst, attr)
-
-
 class _DirectoryFD(util.directory):
 
     def open(self, path, mode='r'):
         fd = fs.openat(self.fileno(), path, os.O_RDONLY)
         name = os.path.join(self.name, path)
-        return file_with_name(os.fdopen(fd, mode), name)
+        return os.fdopen(fd, mode)
 
     def listdir(self):
         # TODO: fsnix calls rewinddir prior to readdr'ing its way through
