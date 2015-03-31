@@ -3,6 +3,7 @@ from collections import namedtuple
 import py.path
 import pytest
 import py_compile
+from .common import IS_PYTHON_27
 
 
 class PackageDirectoryTree(object):
@@ -29,13 +30,11 @@ class PackageDirectoryTree(object):
         name, mod = self.import_module(path, lineage)
         self.packages[name] = (py.path.local(mod.__file__), mod)
         self.packages_by_category.setdefault(category, []).append(name)
-        return name
 
     def add_module(self, path, lineage, category):
         name, mod = self.import_module(path, lineage)
         self.modules[name] = (py.path.local(mod.__file__), mod)
         self.modules_by_category.setdefault(category, []).append(name)
-        return name
 
 
 class ModuleFixture(namedtuple('ModuleFixture', 'name path')):
@@ -47,7 +46,8 @@ class ModuleFixture(namedtuple('ModuleFixture', 'name path')):
 
 def prep_pure_python(fixtures, tmpdir):
     fixtures.join('py_and_pyc.py').copy(tmpdir)
-    return ModuleFixture('py_and_pyc', tmpdir.join('py_and_pyc.py'))
+    path = tmpdir.join('py_and_pyc.py')
+    return ModuleFixture('py_and_pyc', path)
 
 
 def prep_pure_bytecode(fixtures, tmpdir):
@@ -55,11 +55,16 @@ def prep_pure_bytecode(fixtures, tmpdir):
     pure_bytecode_src = tmpdir.join('no_py.py')
     py_compile.compile(str(pure_bytecode_src))
     pure_bytecode_src.remove()
-    return ModuleFixture('no_py', tmpdir.join('no_py.pyc'))
+    path = tmpdir.join('no_py.pyc')
+    return ModuleFixture('no_py', path)
 
 
 def prep_modules(tmpdir):
-    FUNCS = [prep_pure_python, prep_pure_bytecode]
+    FUNCS = [prep_pure_python]
+    if IS_PYTHON_27:
+        # TODO: how do I get python 3.4 imp/importlib to load a module
+        # that *only* has bytecode?
+        FUNCS.append(prep_pure_bytecode)
     fixtures = py.path.local(py.path.local(__file__).dirname).join('fixtures')
     return [f(fixtures, tmpdir) for f in FUNCS]
 
@@ -81,7 +86,7 @@ def package_directory_tree(tmpdir):
         package_path = parent.mkdir(package)
         package_path.ensure('__init__.py')
 
-        name = tree.add_package(package_path, lineage, category='py_and_pyc')
+        tree.add_package(package_path, lineage, category='py_and_pyc')
 
         for mod_fixture in modules:
             mod_fixture.path.copy(package_path)

@@ -2,10 +2,23 @@ import pytest
 import os
 from pepperbox.support import DirectoryFD
 from .common import (only_py27, IS_PYTHON_27,
-                     walk_up_directory_tree,
                      mod__files__equal)
 
 pytestmark = only_py27
+
+
+def walk_up_directory_tree(loader, path, name, is_package=False):
+    head = str(path)
+    args = ()
+    while head and head != os.path.sep:
+        head, new_tail = os.path.split(head)
+
+        args = (new_tail,) + args
+        tail = os.path.join(*args)
+
+        dirobj = DirectoryFD(head)
+        pol = loader(head, dirobj, tail, is_package)
+        yield pol.load_module(name)
 
 
 def mod__files__py_to_pyc(loaded, actual):
