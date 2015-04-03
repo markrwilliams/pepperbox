@@ -17,7 +17,7 @@ def walk_up_directory_tree(loader, path, name, is_package=False):
         tail = os.path.join(*args)
 
         dirobj = DirectoryFD(head)
-        pol = loader(head, dirobj, tail, is_package)
+        pol = loader(dirobj, tail, is_package)
         yield pol.load_module(name)
 
 
@@ -83,8 +83,7 @@ def test_loaders_inaccessible_module_fails(tmpdir,
                                            loader,
                                            compare_file_attrs):
     with pytest.raises(ImportError):
-        missing_pol = loader(str(tmpdir),
-                             DirectoryFD(str(tmpdir)),
+        missing_pol = loader(DirectoryFD(str(tmpdir)),
                              'missing.py',
                              is_package=False)
         missing_pol.load_module('missing')

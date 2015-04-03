@@ -14,8 +14,7 @@ callable_with_gil = make_callable_with_gil(INITMODULEFUNC)
 
 
 class OpenatLoader(object):
-    def __init__(self, path_entry, dirobj, relpath, is_package):
-        self.path_entry = path_entry
+    def __init__(self, dirobj, relpath, is_package):
         self.dirobj = dirobj
         self.relpath = relpath
         self._is_package = is_package
@@ -31,19 +30,21 @@ class OpenatLoader(object):
             module = sys.modules[fullname]
         else:
             module = imp.new_module(fullname)
-        components = fullname.split('.')
-        package_parts = components[:-1]
-        module_name = components[-1]
-        module.__file__ = os.path.join(self.path_entry,
-                                       *(package_parts + [self.relpath]))
+
+        package, _, module_name = fullname.rpartition('.')
+
+        module.__file__ = os.path.join(self.dirobj.name, self.relpath)
         module.__name__ = fullname
-        module.__package__ = '.'.join(components[:-1])
 
         if self._is_package:
-            module.__path__ = [os.path.join(self.path_entry, *components)]
+            module.__package__ = module_name
+            module.__path__ = [os.path.join(self.dirobj.name, module_name)]
+        else:
+            module.__package__ = package
 
-        module = self._populate_module(module, fullname, module_name)
-        sys.modules[fullname] = module
+        sys.modules[fullname] = module = self._populate_module(module,
+                                                               fullname,
+                                                               module_name)
 
         return module
 
@@ -51,6 +52,7 @@ class OpenatLoader(object):
 class PyOpenatLoader(OpenatLoader):
 
     def _populate_module(self, module, fullname, shortname):
+        sys.modules[fullname] = module
         try:
             with self.dirobj.open(self.relpath) as f:
                 src = f.read()
@@ -62,6 +64,13 @@ class PyOpenatLoader(OpenatLoader):
         exec src in module.__dict__
 
         return module
+
+
+class LoadCompiledModuleFailure(Exception):
+
+    def __init__(self, real_exc):
+        super(LoadCompiledModuleFailure, self).__init__()
+        self.real_exc = real_exc
 
 
 class PyCompiledOpenatLoader(OpenatLoader):
@@ -83,33 +92,41 @@ class PyCompiledOpenatLoader(OpenatLoader):
             stat = self.dirobj.stat(uncompiled)
         except OSError as e:
             if e.errno != errno.ENOENT:
-                raise
+                raise LoadCompiledModuleFailure(e)
         else:
             # compare only lowest 4 bytes
             if int(stat.st_mtime) & 0xFFFFFFFF != mtime:
-                raise ImportError
+                raise LoadCompiledModuleFailure(ImportError())
 
-    def load_module(self, fullname):
+    def wrapped_load_module(self, fullname):
         try:
             with self.dirobj.open(self.relpath) as f:
                 self.fileobj = f
                 magic = self._read_marshal_long(f)
                 if magic is None or magic != self.MAGIC:
-                    raise ImportError('Bad magic number in '
-                                      '{}'.format(self.relpath))
+                    raise LoadCompiledModuleFailure(
+                        ImportError('Bad magic number in '
+                                    '{}'.format(self.relpath)))
                 mtime = self._read_marshal_long(f)
                 if mtime is None:
-                    raise EOFError
+                    raise LoadCompiledModuleFailure(EOFError())
 
                 self._ensure_mtime_ok(mtime)
                 return super(PyCompiledOpenatLoader,
                              self).load_module(fullname)
         except OSError as e:
             if e.errno != errno.ENOENT:
-                raise
-            raise ImportError(e)
+                raise LoadCompiledModuleFailure(e)
+            raise LoadCompiledModuleFailure(ImportError(e))
+
+    def load_module(self, fullname):
+        try:
+            return self.wrapped_load_module(fullname)
+        except LoadCompiledModuleFailure as e:
+            raise e.real_exc
 
     def _populate_module(self, module, fullname, shortname):
+        sys.modules[fullname] = module
         exec marshal.load(self.fileobj) in module.__dict__
         return module
 
@@ -126,8 +143,8 @@ class TryPycThenPyOpenatLoader(object):
 
     def load_module(self, *args, **kwargs):
         try:
-            return self.pyc_loader.load_module(*args, **kwargs)
-        except:
+            return self.pyc_loader.wrapped_load_module(*args, **kwargs)
+        except LoadCompiledModuleFailure:
             return self.py_loader.load_module(*args, **kwargs)
 
 
@@ -178,7 +195,7 @@ class OpenatFileFinder(BaseOpenatFileFinder):
                 loader = TryPycThenPyOpenatLoader
             elif kind == imp.PY_COMPILED:
                 loader = PyCompiledOpenatLoader
-            return loader(self.path, dirobj, relpath, is_package)
+            return loader(dirobj, relpath, is_package)
 
     def find_module(self, fullname, path=None):
         for dirobj in self.dirobjs_from_path(path):
