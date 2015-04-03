@@ -4,6 +4,7 @@ import ctypes
 from importlib.util import spec_from_file_location
 from importlib.abc import SourceLoader, MetaPathFinder
 from importlib.machinery import (ModuleSpec,
+                                 SourcelessFileLoader,
                                  ExtensionFileLoader,
                                  SOURCE_SUFFIXES, BYTECODE_SUFFIXES,
                                  BuiltinImporter)
@@ -16,15 +17,15 @@ from .support import INITMODULEFUNC
 callable_with_gil = make_callable_with_gil(INITMODULEFUNC)
 
 
-class OpenatLoader(object):
+class OpenatLoader(SourceLoader):
     def __init__(self, fullname, path, dirobj):
         self.fullname = fullname
+        self.name = fullname
         self.path = path
         self.dirobj = dirobj
 
 
-class OpenatSourceFileLoader(OpenatLoader, SourceLoader):
-
+class _OpenatGetMixin(SourceLoader):
     def path_stats(self, path):
         stats = self.dirobj.stat(path)
         return {'mtime': stats.st_mtime, 'size': stats.st_size}
@@ -37,7 +38,12 @@ class OpenatSourceFileLoader(OpenatLoader, SourceLoader):
         return self.path
 
 
-class OpenatSourcelessFileLoader(OpenatSourceFileLoader):
+class OpenatSourceFileLoader(OpenatLoader, _OpenatGetMixin):
+    pass
+
+
+class OpenatSourcelessFileLoader(OpenatLoader, SourcelessFileLoader,
+                                 _OpenatGetMixin):
 
     def get_source(self, fullname):
         return None

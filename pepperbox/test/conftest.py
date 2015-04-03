@@ -3,7 +3,7 @@ from collections import namedtuple
 import py.path
 import pytest
 import py_compile
-from .common import IS_PYTHON_27
+from .common import IS_PYTHON_27, IS_PYTHON_34
 
 
 class PackageDirectoryTree(object):
@@ -50,21 +50,34 @@ def prep_pure_python(fixtures, tmpdir):
     return ModuleFixture('py_and_pyc', path)
 
 
+def _rename_python3_bytecode(pure_python):
+    # "If the py source file is missing, the pyc file inside
+    # __pycache__ will be ignored. This eliminates the problem of
+    # accidental stale pyc file imports."
+    # https://www.python.org/dev/peps/pep-3147/
+    from importlib.util import cache_from_source
+    bytecode = py.path.local(cache_from_source(str(pure_python)))
+    target_dir, target_fn = pure_python.dirname, pure_python.basename
+    target_fn = target_fn.replace('.py', '.pyc')
+    target = py.path.local(target_dir).join(target_fn)
+    bytecode.copy(target)
+    return target
+
+
 def prep_pure_bytecode(fixtures, tmpdir):
     fixtures.join('no_py.py').copy(tmpdir)
     pure_bytecode_src = tmpdir.join('no_py.py')
     py_compile.compile(str(pure_bytecode_src))
     pure_bytecode_src.remove()
-    path = tmpdir.join('no_py.pyc')
+    if IS_PYTHON_34:
+        path = _rename_python3_bytecode(pure_bytecode_src)
+    else:
+        path = tmpdir.join('no_py.pyc')
     return ModuleFixture('no_py', path)
 
 
 def prep_modules(tmpdir):
-    FUNCS = [prep_pure_python]
-    if IS_PYTHON_27:
-        # TODO: how do I get python 3.4 imp/importlib to load a module
-        # that *only* has bytecode?
-        FUNCS.append(prep_pure_bytecode)
+    FUNCS = [prep_pure_python, prep_pure_bytecode]
     fixtures = py.path.local(py.path.local(__file__).dirname).join('fixtures')
     return [f(fixtures, tmpdir) for f in FUNCS]
 
