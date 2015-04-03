@@ -49,7 +49,8 @@ class OpenatSourcelessFileLoader(OpenatLoader, SourcelessFileLoader,
         return None
 
 
-class OpenatExtensionFileLoader(OpenatLoader, ExtensionFileLoader):
+class OpenatExtensionFileLoader(OpenatLoader, _OpenatGetMixin,
+                                ExtensionFileLoader):
 
     def create_module(self, spec):
         _, _, shortname = spec.name.rpartition('.')
