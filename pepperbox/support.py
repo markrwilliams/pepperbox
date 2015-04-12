@@ -95,6 +95,30 @@ class DirectoryFD(object):
 
 
 class _Py_PackageContext(object):
+    """A ctypes implementation of _Py_PackageContext switching, which
+    necessary for loading extension modules with fully qualified
+    names:
+
+    "Make sure name is fully qualified.
+
+    This is a bit of a hack: when the shared library is loaded,
+    the module name is "package.module", but the module calls
+    Py_InitModule*() with just "module" for the name.  The shared
+    library loader squirrels away the true name of the module in
+    _Py_PackageContext, and Py_InitModule*() will substitute this
+    (if the name actually matches)."
+
+    See:
+    https://hg.python.org/releasing/2.7.9/file/753a8f457ddc/Python/modsupport.c#l49
+
+    :param fullname: the full name, including parent packages, if any,
+    of the extension module about to be loaded
+
+    :param shortname: the name of the module being loaded, without any
+    parent packages.
+
+    """
+
     _Py_PackageContext = ctypes.c_char_p.in_dll(ctypes.pythonapi,
                                                 '_Py_PackageContext')
 
