@@ -2,11 +2,11 @@
 
 
 PyMODINIT_FUNC
-initpy27c(void)
+initcpython_27c(void)
 {
-    const char constant[] = "py27 extension module";
+    const char constant[] = "cpython_27 extension module";
     PyObject *m, *StringConstant;
-    m = Py_InitModule("py27c", NULL);
+    m = Py_InitModule("cpython_27c", NULL);
     if (m == NULL)
         return;
     StringConstant = PyString_FromString(constant);

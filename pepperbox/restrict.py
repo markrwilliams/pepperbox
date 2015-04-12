@@ -24,7 +24,9 @@ def restrict():
     limitResource(resource.RLIMIT_CPU, 9, 11)
     limitResource(resource.RLIMIT_AS, 512 * 1024 * 1024)
     limitResource(resource.RLIMIT_DATA, 512 * 1024 * 1024)
-    limitResource(resource.RLIMIT_FSIZE, 10 * 1024 * 1024)
+    limitResource(resource.RLIMIT_RSS, 10 * 1024 * 1024)
+    limitResource(resource.RLIMIT_CORE, 0)
+    limitResource(resource.RLIMIT_FSIZE, 0)
     limitResource(resource.RLIMIT_MEMLOCK, 0)
     limitResource(resource.RLIMIT_NPROC, 0)
 

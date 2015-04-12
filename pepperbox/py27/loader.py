@@ -40,7 +40,7 @@ class OpenatLoader(object):
             module.__package__ = module_name
             module.__path__ = [os.path.join(self.dirobj.name, module_name)]
         else:
-            module.__package__ = package
+            module.__package__ = package or None
 
         sys.modules[fullname] = module = self._populate_module(module,
                                                                fullname,

@@ -1,8 +1,6 @@
 import sys
+import py
 import pytest
-import os
-from pepperbox.support import DirectoryFD
-
 
 IS_PYTHON_27 = sys.version_info.major == 2 and sys.version_info.minor == 7
 IS_PYTHON_34 = sys.version_info.major == 3 and sys.version_info.minor == 4
