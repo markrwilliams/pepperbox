@@ -1,6 +1,6 @@
+import ctypes
 import os
 import stat
-
 import sys
 
 
@@ -92,6 +92,23 @@ class DirectoryFD(object):
 
     def __del__(self):
         self.close()
+
+
+class _Py_PackageContext(object):
+    _Py_PackageContext = ctypes.c_char_p.in_dll(ctypes.pythonapi,
+                                                '_Py_PackageContext')
+
+    def __init__(self, fullname, shortname):
+        self.fullname = fullname
+        self.shortname = shortname
+
+    def __enter__(self):
+        self.oldpackagecontext = self._Py_PackageContext.value
+        if self.fullname != self.shortname:
+            self._Py_PackageContext.value = self.fullname
+
+    def __exit__(self, *exc_info):
+        self._Py_PackageContext.value = self.oldpackagecontext
 
 
 class BaseOpenatFileFinder(object):

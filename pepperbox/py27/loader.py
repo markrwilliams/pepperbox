@@ -7,8 +7,8 @@ import sys
 import struct
 import marshal
 from .._ffi import fdlopen, RTLD_NOW, dlsym, make_callable_with_gil
-from ..support import BaseOpenatFileFinder
 from .support import INITMODULEFUNC
+from ..support import BaseOpenatFileFinder, _Py_PackageContext
 
 callable_with_gil = make_callable_with_gil(INITMODULEFUNC)
 
@@ -22,7 +22,8 @@ class OpenatLoader(object):
     def is_package(self, fullname):
         return self._is_package
 
-    def _populate_module(self, module, fullname):  # pragma: no cover
+    def _populate_module(self, module, fullname,
+                         shortname):  # pragma: no cover
         raise NotImplementedError
 
     def load_module(self, fullname):
@@ -158,7 +159,8 @@ class RTLDOpenatLoader(OpenatLoader):
                 loaded_so = fdlopen(so_fd, RTLD_NOW)
                 initmodule_pointer = dlsym(loaded_so, 'init%s' % shortname)
                 initmodule = callable_with_gil(initmodule_pointer)
-                initmodule()
+                with _Py_PackageContext(fullname, shortname):
+                    initmodule()
                 return sys.modules[fullname]
         finally:
             gc.enable()

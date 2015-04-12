@@ -9,9 +9,9 @@ from importlib.machinery import (ModuleSpec,
                                  SOURCE_SUFFIXES, BYTECODE_SUFFIXES,
                                  BuiltinImporter)
 import os
-from ..support import BaseOpenatFileFinder
 from .._ffi import fdlopen, RTLD_NOW, dlsym, make_callable_with_gil
 from .support import INITMODULEFUNC
+from ..support import BaseOpenatFileFinder, _Py_PackageContext
 
 
 callable_with_gil = make_callable_with_gil(INITMODULEFUNC)
@@ -62,7 +62,9 @@ class OpenatExtensionFileLoader(OpenatLoader, _OpenatGetMixin,
                 loaded_so = fdlopen(so_fd, RTLD_NOW)
                 initmodule_pointer = dlsym(loaded_so, b'PyInit_' + shortname)
                 initmodule = callable_with_gil(initmodule_pointer)
-                m = initmodule()
+
+                with _Py_PackageContext(spec.name, shortname):
+                    m = initmodule()
 
                 m_ptr = ctypes.py_object(m)
                 m_def = ctypes.pythonapi.PyModule_GetDef(m_ptr)
