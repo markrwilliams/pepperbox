@@ -6,7 +6,7 @@ from collections import namedtuple
 import py.path
 import pytest
 import py_compile
-from .common import IS_PYTHON_27
+from .common import IS_PYTHON_27, LoadModuleOrPackage
 
 
 def generate_py_tag():
@@ -37,7 +37,13 @@ PY_TAG = generate_py_tag()
 FIXTURES_SOURCE = py.path.local(__file__).dirpath('fixtures_src')
 LINEAGE = ('a', 'b', 'c', 'd')
 
-ModuleFixture = namedtuple('ModuleFixture', 'shortname category module path')
+
+class ModuleFixture(namedtuple('ModuleFixture',
+                               'shortname category module path')):
+
+    @property
+    def package(self):
+        return self.module.__name__.rpartition('.')[0]
 
 
 class FixtureCategory(object):
@@ -66,29 +72,9 @@ class FixtureCategory(object):
         if self.module_name is not None:
             fqn.append(self.module_name)
 
-        to_uncache = []
-        path = [str(directory)]
-
-        for i, shortname in enumerate(fqn, 1):
-            # This function does not handle hierarchical module names
-            # (names containing dots). In order to find P.M, that is,
-            # submodule M of package P, use find_module() and
-            # load_module() to find and load package P, and then use
-            # find_module() with the path argument set to
-            # P.__path__. When P itself has a dotted name, apply this
-            # recipe recursively.
-            # https://docs.python.org/2/library/imp.html#imp.find_module
-            name = '.'.join(fqn[:i])
-            spec = imp.find_module(shortname, path)
-            mod = imp.load_module(name, *spec)
-
-            path = getattr(mod, '__path__', [])
-            to_uncache.append(name)
-
-        for u in to_uncache:
-            sys.modules.pop(u, None)
-
-        return mod
+        module_or_package = '.'.join(fqn)
+        with LoadModuleOrPackage(str(directory), module_or_package) as mop:
+            return mop
 
     def __call__(self, root, directory, lineage):
         self.ensure(directory, bool(lineage))
@@ -216,7 +202,7 @@ def make_modules_by_category(root, lineage=LINEAGE):
         add_category(cat, root, root, lineage=())
 
     directory = root
-    for i, name in enumerate(LINEAGE, 1):
+    for i, name in enumerate(lineage, 1):
         directory = directory.join(name)
         cur_lineage = lineage[:i]
 

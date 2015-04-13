@@ -30,7 +30,7 @@ class OpenatLoader(object):
         if fullname in sys.modules:
             module = sys.modules[fullname]
         else:
-            module = imp.new_module(fullname)
+            sys.modules[fullname] = module = imp.new_module(fullname)
 
         package, _, module_name = fullname.rpartition('.')
 
@@ -38,14 +38,23 @@ class OpenatLoader(object):
         module.__name__ = fullname
 
         if self._is_package:
-            module.__package__ = module_name
             module.__path__ = [os.path.join(self.dirobj.name, module_name)]
-        else:
-            module.__package__ = package or None
 
-        sys.modules[fullname] = module = self._populate_module(module,
-                                                               fullname,
-                                                               module_name)
+        # setting __package__ in python 2 is weird.  __package__ is
+        # set on a module *only* if that module *itself* imports
+        # something.  legally this is because that's what pep 0366
+        # says; practically it's because __package__ is only set in
+        # get_parent in import.c.  we mimic that behavior here by
+        # reaching into sys.modules to retrieve our parent package.
+        # that's something we can do because'
+        #
+        # https://www.python.org/dev/peps/pep-0366/
+        # http://thread.gmane.org/gmane.comp.python.devel/113438
+
+        if package:
+            sys.modules[package].__package__ = package
+
+        self._populate_module(module, fullname, module_name)
 
         return module
 
@@ -63,7 +72,6 @@ class PyOpenatLoader(OpenatLoader):
             raise ImportError(e)
 
         exec src in module.__dict__
-
         return module
 
 
@@ -159,9 +167,17 @@ class RTLDOpenatLoader(OpenatLoader):
                 loaded_so = fdlopen(so_fd, RTLD_NOW)
                 initmodule_pointer = dlsym(loaded_so, 'init%s' % shortname)
                 initmodule = callable_with_gil(initmodule_pointer)
+
+                # initmodule apparently unsets __file__, but leaves
+                # other attributes alone
+                __file__ = module.__file__
+
                 with _Py_PackageContext(fullname, shortname):
                     initmodule()
-                return sys.modules[fullname]
+                m = sys.modules[fullname]
+
+                m.__file__ = __file__
+                return m
         finally:
             gc.enable()
 

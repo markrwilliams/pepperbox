@@ -1,16 +1,31 @@
+from collections import namedtuple
 import pytest
 import py
 import os
 from pepperbox.support import DirectoryFD
 from .common import (only_py27, IS_PYTHON_27,
-                     mod__files__equal)
+                     mod__files__equal,
+                     LoadModuleOrPackage)
 
 pytestmark = only_py27
 
 
-def walk_up_directory_tree(loader, path, name, is_package=False):
-    head = str(path)
+def walk_up_directory_tree(loader, fixture, is_package=False):
+    # attempt to load a given module at all possible directory depths.
+    #
+    # so for a module /home/you/a/b/c/d.py
+    #
+    # directory = /home/you/a/b/c, relpath = d.py
+    # directory = /home/you/a/b, relpath = c/d.py
+    # ...
+    # directory = /, relpath = home/you/a/b/c/d.py
+    #
+    # this ensures that __name__ and __file__ are determined correctly
+    # regardless of a module's location
+    name = fixture.module.__name__
+    head = str(fixture.path)
     args = ()
+
     while head and head != os.path.sep:
         head, new_tail = os.path.split(head)
 
@@ -19,7 +34,17 @@ def walk_up_directory_tree(loader, path, name, is_package=False):
 
         dirobj = DirectoryFD(head)
         pol = loader(dirobj, tail, is_package)
-        yield pol.load_module(name)
+        if fixture.package:
+            # because of the particulars of setting module.__package__,
+            # we need to make sure the immediate parents of this
+            # module or package are available in sys.modules
+            package_parent = fixture.path.pypkgpath().dirname
+            with LoadModuleOrPackage(package_parent,
+                                     fixture.package):
+                module = pol.load_module(name)
+        else:
+            module = pol.load_module(name)
+        yield module
 
 
 def mod__files__expected(loaded, actual):
@@ -27,10 +52,6 @@ def mod__files__expected(loaded, actual):
     actual_p = py.path.local(actual.__file__)
     assert loaded_p.dirname == actual_p.dirname
     assert loaded_p.purebasename == actual_p.purebasename
-
-
-def noop(*args, **kwargs):
-    pass
 
 
 def _parametrize():
@@ -42,7 +63,7 @@ def _parametrize():
          ('no_py', loader.PyCompiledOpenatLoader, mod__files__equal),
          ('py_and_pyc', loader.TryPycThenPyOpenatLoader,
           mod__files__expected),
-         ('extension_module', loader.RTLDOpenatLoader, noop)])
+         ('extension_module', loader.RTLDOpenatLoader, mod__files__expected)])
 
 
 parametrized_loaders = pytest.mark.parametrize_skipif(
@@ -55,17 +76,11 @@ def test_loaders_succeed_with_modules(modules_by_category,
                                       category,
                                       loader, compare_file_attrs):
     for fixture in modules_by_category.get(category, ()):
-        fullname = fixture.module.__name__
-        is_package = bool(fixture.module.__package__)
-        for loaded_module in walk_up_directory_tree(loader,
-                                                    fixture.path,
-                                                    fullname,
-                                                    is_package):
+        for loaded_module in walk_up_directory_tree(loader, fixture,
+                                                    is_package=False):
 
             assert loaded_module.contents == fixture.module.contents
             assert loaded_module.__name__ == fixture.module.__name__
-            if is_package:
-                assert loaded_module.__package__ == fixture.module.__package__
-                assert loaded_module.__path__ == fixture.module.__path__
+            assert loaded_module.__package__ == fixture.module.__package__
 
             compare_file_attrs(loaded_module, fixture.module)
