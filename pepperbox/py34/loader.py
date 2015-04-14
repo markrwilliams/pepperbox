@@ -53,6 +53,7 @@ class OpenatExtensionFileLoader(OpenatLoader, _OpenatGetMixin,
                                 ExtensionFileLoader):
 
     def create_module(self, spec):
+        fullname = spec.name.encode('ascii')
         _, _, shortname = spec.name.rpartition('.')
         shortname = shortname.encode('ascii')
         gc.disable()
@@ -63,14 +64,21 @@ class OpenatExtensionFileLoader(OpenatLoader, _OpenatGetMixin,
                 initmodule_pointer = dlsym(loaded_so, b'PyInit_' + shortname)
                 initmodule = callable_with_gil(initmodule_pointer)
 
-                with _Py_PackageContext(spec.name.encode('ascii'),
+                with _Py_PackageContext(fullname,
                                         shortname):
                     m = initmodule()
 
                 m_ptr = ctypes.py_object(m)
-                import pdb; pdb.set_trace()
-                m_def = ctypes.pythonapi.PyModule_GetDef(m_ptr)
-                ctypes.pythonapi.PyState_AddModule(m_ptr, m_def)
+                name_ptr = ctypes.py_object(fullname)
+                # ffft
+                path_ascii = os.fsencode(self.path.encode)
+                path_ptr = ctypes.py_object(path_ascii)
+
+                res = ctypes.pythonapi._PyImport_FixupExtensionObject(m_ptr,
+                                                                      name_ptr,
+                                                                      path_ptr)
+                if res < 0:
+                    raise ImportError("_PyImport_FixupExtensionObject failed")
 
                 m.__file__ = self.path
                 return m
