@@ -3,11 +3,10 @@ import pytest
 import os
 from pepperbox.support import DirectoryFD
 from .common import (only_py27,
-                     CATEGORIES_TABLE, LOADER,
+                     CATEGORIES_TABLE, LOADER, in_category,
                      track_tests, reset_tests,
                      TestsForPyLoader,
                      TestsForPyCompiledLoader,
-                     TestsForTryPycThenPyLoader,
                      TestsForExtensionModule,
                      LoadModuleOrPackage)
 
@@ -18,6 +17,11 @@ def setup_module(module):
     track = track_tests(module)
 
     from pepperbox.py27 import loader as L
+
+    @in_category('package')
+    @in_category('py_and_pyc')
+    class TestsForTryPycThenPyLoader(TestsForPyCompiledLoader):
+        pass
 
     track(TestsForPyLoader).loader = L.PyOpenatLoader
     track(TestsForPyCompiledLoader).loader = L.PyCompiledOpenatLoader

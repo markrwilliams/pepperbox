@@ -63,10 +63,12 @@ class OpenatExtensionFileLoader(OpenatLoader, _OpenatGetMixin,
                 initmodule_pointer = dlsym(loaded_so, b'PyInit_' + shortname)
                 initmodule = callable_with_gil(initmodule_pointer)
 
-                with _Py_PackageContext(spec.name, shortname):
+                with _Py_PackageContext(spec.name.encode('ascii'),
+                                        shortname):
                     m = initmodule()
 
                 m_ptr = ctypes.py_object(m)
+                import pdb; pdb.set_trace()
                 m_def = ctypes.pythonapi.PyModule_GetDef(m_ptr)
                 ctypes.pythonapi.PyState_AddModule(m_ptr, m_def)
 

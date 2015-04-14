@@ -149,7 +149,7 @@ class SetsUpFixture(object):
     def __call__(self, root, directory, lineage):
         self.ensure(directory, bool(lineage))
         path = self.path(directory)
-        if path.exists():
+        if not path.exists():
             self.create()
             self.install(directory)
         module = self.load(root, lineage)
@@ -281,12 +281,6 @@ class TestsForPyCompiledLoader(TestsForPurePythonLoaders):
         super(TestsForPyCompiledLoader,
               self).assert_module_dot_files_equal(loaded, expected)
         assert py.path.local(loaded.__file__).ext == '.pyc'
-
-
-@in_category('package')
-@in_category('py_and_pyc')
-class TestsForTryPycThenPyLoader(TestsForPyCompiledLoader):
-    pass
 
 
 @in_category('extension_module')
