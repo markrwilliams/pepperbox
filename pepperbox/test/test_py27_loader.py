@@ -1,13 +1,22 @@
-from collections import namedtuple
+import itertools
 import pytest
-import py
 import os
 from pepperbox.support import DirectoryFD
-from .common import (only_py27, IS_PYTHON_27,
-                     mod__files__equal,
+from .common import (only_py27,
+                     CATEGORIES, CATEGORIES_TABLE, LOADER,
+                     TestsForPyLoader,
+                     TestsForPyCompiledLoader,
+                     TestsForTryPycThenPyLoader,
+                     TestsForExtensionModule,
                      LoadModuleOrPackage)
 
 pytestmark = only_py27
+
+PY27_LOADER = 'pepperbox.py27.loader'
+TestsForPyLoader.set_loader(PY27_LOADER, 'PyOpenatLoader')
+TestsForPyCompiledLoader.set_loader(PY27_LOADER, 'PyCompiledOpenatLoader')
+TestsForTryPycThenPyLoader.set_loader(PY27_LOADER, 'TryPycThenPyOpenatLoader')
+TestsForExtensionModule.set_loader(PY27_LOADER, 'RTLDOpenatLoader')
 
 
 def walk_up_directory_tree(loader, fixture, is_package=False):
@@ -47,40 +56,13 @@ def walk_up_directory_tree(loader, fixture, is_package=False):
         yield module
 
 
-def mod__files__expected(loaded, actual):
-    loaded_p = py.path.local(loaded.__file__)
-    actual_p = py.path.local(actual.__file__)
-    assert loaded_p.dirname == actual_p.dirname
-    assert loaded_p.purebasename == actual_p.purebasename
-
-
-def _parametrize():
-    from pepperbox.py27 import loader
-
-    return pytest.mark.parametrize(
-        'category,loader,compare_file_attrs',
-        [('py_and_pyc', loader.PyOpenatLoader, mod__files__expected),
-         ('no_py', loader.PyCompiledOpenatLoader, mod__files__equal),
-         ('py_and_pyc', loader.TryPycThenPyOpenatLoader,
-          mod__files__expected),
-         ('extension_module', loader.RTLDOpenatLoader, mod__files__expected)])
-
-
-parametrized_loaders = pytest.mark.parametrize_skipif(
-    _parametrize,
-    skipif=not IS_PYTHON_27)
-
-
-@parametrized_loaders
-def test_loaders_succeed_with_modules(modules_by_category,
-                                      category,
-                                      loader, compare_file_attrs):
+@pytest.mark.parametrize('category', CATEGORIES)
+def test_loaders_succeed(modules_by_category, category):
     for fixture in modules_by_category.get(category, ()):
-        for loaded_module in walk_up_directory_tree(loader, fixture,
-                                                    is_package=False):
-
-            assert loaded_module.contents == fixture.module.contents
-            assert loaded_module.__name__ == fixture.module.__name__
-            assert loaded_module.__package__ == fixture.module.__package__
-
-            compare_file_attrs(loaded_module, fixture.module)
+        for tests_for_loader in CATEGORIES_TABLE[category][LOADER]:
+            is_package = category == 'package'
+            tests = tests_for_loader(is_empty=is_package)
+            for loaded_module in walk_up_directory_tree(tests.loader,
+                                                        fixture,
+                                                        is_package=is_package):
+                tests.assert_modules_equal(loaded_module, fixture.module)
