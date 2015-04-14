@@ -3,7 +3,8 @@ import pytest
 import os
 from pepperbox.support import DirectoryFD
 from .common import (only_py27,
-                     CATEGORIES, CATEGORIES_TABLE, LOADER,
+                     CATEGORIES_TABLE, LOADER,
+                     track_tests, reset_tests,
                      TestsForPyLoader,
                      TestsForPyCompiledLoader,
                      TestsForTryPycThenPyLoader,
@@ -12,11 +13,19 @@ from .common import (only_py27,
 
 pytestmark = only_py27
 
-PY27_LOADER = 'pepperbox.py27.loader'
-TestsForPyLoader.set_loader(PY27_LOADER, 'PyOpenatLoader')
-TestsForPyCompiledLoader.set_loader(PY27_LOADER, 'PyCompiledOpenatLoader')
-TestsForTryPycThenPyLoader.set_loader(PY27_LOADER, 'TryPycThenPyOpenatLoader')
-TestsForExtensionModule.set_loader(PY27_LOADER, 'RTLDOpenatLoader')
+
+def setup_module(module):
+    track = track_tests(module)
+
+    from pepperbox.py27 import loader as L
+
+    track(TestsForPyLoader).loader = L.PyOpenatLoader
+    track(TestsForPyCompiledLoader).loader = L.PyCompiledOpenatLoader
+    track(TestsForTryPycThenPyLoader).loader = L.TryPycThenPyOpenatLoader
+    track(TestsForExtensionModule).loader = L.RTLDOpenatLoader
+
+
+teardown_module = reset_tests
 
 
 def walk_up_directory_tree(loader, fixture, is_package=False):
@@ -56,7 +65,7 @@ def walk_up_directory_tree(loader, fixture, is_package=False):
         yield module
 
 
-@pytest.mark.parametrize('category', CATEGORIES)
+@pytest.mark.parametrize('category', CATEGORIES_TABLE)
 def test_loaders_succeed(modules_by_category, category):
     for fixture in modules_by_category.get(category, ()):
         for tests_for_loader in CATEGORIES_TABLE[category][LOADER]:

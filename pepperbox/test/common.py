@@ -167,10 +167,11 @@ class SetsUpFixture(object):
 
 class TestsForLoaderInCategory(object):
     kind = LOADER
+    loader = None
 
     @classmethod
-    def set_loader(cls, path, classname):
-        cls.loader = getattr(importlib.import_module(path), classname)
+    def reset(cls):
+        cls.loader = None
 
     def __init__(self, is_empty=False):
         self.is_empty = is_empty
@@ -184,6 +185,21 @@ class TestsForLoaderInCategory(object):
 
     def assert_module_dot_files_equal(self, loaded, expected):
         assert loaded.__file__ == expected.__file__
+
+
+def track_tests(module):
+    module._TRACK_TESTS = []
+
+    def track(Tests):
+        module._TRACK_TESTS.append(Tests)
+        return Tests
+
+    return track
+
+
+def reset_tests(module):
+    for test in module._TRACK_TESTS:
+        test.reset()
 
 
 @in_category('package')
