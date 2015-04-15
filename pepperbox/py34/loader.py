@@ -71,7 +71,7 @@ class OpenatExtensionFileLoader(OpenatLoader, _OpenatGetMixin,
                 m_ptr = ctypes.py_object(m)
                 name_ptr = ctypes.py_object(fullname)
                 # ffft
-                path_ascii = os.fsencode(self.path.encode)
+                path_ascii = os.fsencode(self.path)
                 path_ptr = ctypes.py_object(path_ascii)
 
                 res = ctypes.pythonapi._PyImport_FixupExtensionObject(m_ptr,

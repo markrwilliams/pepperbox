@@ -3,7 +3,6 @@ import subprocess
 import sys
 from collections import namedtuple
 import imp
-import importlib
 import py
 import py_compile
 import pytest
@@ -58,36 +57,45 @@ class LoadModuleOrPackage(object):
 
     The module and any intermediate packages are available in
     sys.modules inside the with block.  They are removed after it terminates.
-
-    :param directory: Path to the directory that contains the
-                      requested module/package path.
-    :param module_or_package_path: A dotted import path
     '''
 
-    def __init__(self, directory, module_or_package_path):
-        self.directory = directory
+    def __init__(self, root, filepath, module_or_package_path):
+        self.root = root
+        self.filepath = filepath
         self.module_or_package_path = module_or_package_path
         self.to_uncache = []
 
-    def __enter__(self):
-        fqn = self.module_or_package_path.split('.')
-        path = [self.directory]
-        for i, shortname in enumerate(fqn, 1):
-            # This function does not handle hierarchical module names
-            # (names containing dots). In order to find P.M, that is,
-            # submodule M of package P, use find_module() and
-            # load_module() to find and load package P, and then use
-            # find_module() with the path argument set to
-            # P.__path__. When P itself has a dotted name, apply this
-            # recipe recursively.
-            # https://docs.python.org/2/library/imp.html#imp.find_module
-            name = '.'.join(fqn[:i])
-            spec = imp.find_module(shortname, path)
-            module_or_package = imp.load_module(name, *spec)
+    if IS_PYTHON_27:
+        def _import_module(self):
+            fqn = self.module_or_package_path.split('.')
+            path = [self.root]
+            for i, shortname in enumerate(fqn, 1):
+                # This function does not handle hierarchical module names
+                # (names containing dots). In order to find P.M, that is,
+                # submodule M of package P, use find_module() and
+                # load_module() to find and load package P, and then use
+                # find_module() with the path argument set to
+                # P.__path__. When P itself has a dotted name, apply this
+                # recipe recursively.
+                # https://docs.python.org/2/library/imp.html#imp.find_module
+                name = '.'.join(fqn[:i])
+                spec = imp.find_module(shortname, path)
+                module_or_package = imp.load_module(name, *spec)
 
-            path = getattr(module_or_package, '__path__', [])
-            self.to_uncache.append(name)
-        return module_or_package
+                path = getattr(module_or_package, '__path__', [])
+                self.to_uncache.append(name)
+            return module_or_package
+    elif IS_PYTHON_34:
+        def _import_module(self):
+            from importlib.util import spec_from_file_location
+            spec = spec_from_file_location(self.module_or_package_path,
+                                           self.filepath)
+            module_or_package = spec.loader.load_module()
+            self.to_uncache.extend(self.module_or_package_path.split('.'))
+            return module_or_package
+
+    def __enter__(self):
+        return self._import_module()
 
     def __exit__(self, *exc_info):
         for name in self.to_uncache:
@@ -118,8 +126,9 @@ def in_category(name):
 
 class SetsUpFixture(object):
     kind = FIXTURE
+    SOURCE = None
+    TARGET_FN = None
     module_name = None
-    sources = ()
 
     def create(self):
         pass
@@ -132,18 +141,21 @@ class SetsUpFixture(object):
             py_compile.compile(str(init))
 
     def path(self, directory):
-        raise NotImplementedError
+        return directory.join(self.TARGET_FN)
 
     def install(self, directory):
         pass
 
-    def load(self, directory, lineage):
+    def load(self, directory, filepath, lineage):
         fqn = list(lineage)
         if self.module_name is not None:
             fqn.append(self.module_name)
 
         module_or_package = '.'.join(fqn)
-        with LoadModuleOrPackage(str(directory), module_or_package) as mop:
+
+        with LoadModuleOrPackage(str(directory),
+                                 str(filepath),
+                                 module_or_package) as mop:
             return mop
 
     def __call__(self, root, directory, lineage):
@@ -152,7 +164,7 @@ class SetsUpFixture(object):
         if not path.exists():
             self.create()
             self.install(directory)
-        module = self.load(root, lineage)
+        module = self.load(root, path, lineage)
 
         if self.module_name is None:
             module_name = lineage[-1]
@@ -204,19 +216,14 @@ def reset_tests(module):
 
 @in_category('package')
 class PackageFixture(SetsUpFixture):
-
-    def path(self, directory):
-        # TODO: this is not fully testing the __init__ related code
-        return directory.join('__init__.py')
+    TARGET_FN = '__init__.py'
 
 
 @in_category('py_and_pyc')
 class SetsUpPyAndPycFixture(SetsUpFixture):
     SOURCE = FIXTURES_SOURCE.join('py_and_pyc.py')
+    TARGET_FN = 'py_and_pyc.py'
     module_name = 'py_and_pyc'
-
-    def path(self, directory):
-        return directory.join(self.SOURCE.basename)
 
     def install(self, location):
         dst = location.join(self.SOURCE.basename)
@@ -246,10 +253,8 @@ class TestsForPyLoader(TestsForPurePythonLoaders):
 @in_category('no_py')
 class SetsUpNoPyFixture(SetsUpFixture):
     SOURCE = FIXTURES_SOURCE.join('no_py.py')
+    TARGET_FN = 'no_py.pyc'
     module_name = 'no_py'
-
-    def path(self, directory):
-        return directory.join(self.SOURCE.purebasename + '.pyc')
 
     def _rename_python3_bytecode(self, pure_python):
         # "If the py source file is missing, the pyc file inside
@@ -289,11 +294,8 @@ class SetsUpExtensionModule(SetsUpFixture):
 
     SO_SRC_DIR = FIXTURES_SOURCE.join(PY_TAG)
     SO_BUILD_DIR = 'build'
-    FILENAME = '{}.so'.format(module_name)
-    SOURCE = py.path.local(SO_SRC_DIR).join(SO_BUILD_DIR).join(FILENAME)
-
-    def path(self, directory):
-        return directory.join(self.SOURCE.basename)
+    TARGET_FN = '{}.so'.format(module_name)
+    SOURCE = py.path.local(SO_SRC_DIR).join(SO_BUILD_DIR).join(TARGET_FN)
 
     def create(self):
         if self.SOURCE.exists():

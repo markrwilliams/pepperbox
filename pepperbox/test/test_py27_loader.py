@@ -62,6 +62,7 @@ def walk_up_directory_tree(loader, fixture, is_package=False):
             # module or package are available in sys.modules
             package_parent = fixture.path.pypkgpath().dirname
             with LoadModuleOrPackage(package_parent,
+                                     str(fixture.path),
                                      fixture.package):
                 module = pol.load_module(name)
         else:
