@@ -24,7 +24,7 @@ def setup_module(module):
 teardown_module = reset_tests
 
 
-@pytest.mark.parametrize('category', CATEGORIES)
+@pytest.mark.parametrize('category', CATEGORIES - set(['bad_pyc']))
 def test_loaders_succeed(modules_by_category, category):
     is_package = category == 'package'
 

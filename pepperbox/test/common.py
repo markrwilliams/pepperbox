@@ -1,3 +1,4 @@
+import contextlib
 import os
 import subprocess
 import sys
@@ -107,7 +108,8 @@ LOADER = 'LOADER'
 CATEGORIES = frozenset(['package',
                         'py_and_pyc',
                         'no_py',
-                        'extension_module'])
+                        'extension_module',
+                        'bad_pyc'])
 CATEGORIES_TABLE = {k: {FIXTURE: [],
                         LOADER: []}
                     for k in CATEGORIES}
@@ -143,7 +145,7 @@ class SetsUpFixture(object):
     def path(self, directory):
         return directory.join(self.TARGET_FN)
 
-    def install(self, directory):
+    def install(self, directory, path):
         pass
 
     def load(self, directory, filepath, lineage):
@@ -198,6 +200,11 @@ class TestsForLoaderInCategory(object):
     def assert_module_dot_files_equal(self, loaded, expected):
         assert loaded.__file__ == expected.__file__
 
+    @contextlib.contextmanager
+    def assert_import_fails(self):
+        with pytest.raises(ImportError):
+            yield
+
 
 def track_tests(module):
     module._TRACK_TESTS = []
@@ -229,6 +236,7 @@ class SetsUpPyAndPycFixture(SetsUpFixture):
         dst = location.join(self.SOURCE.basename)
         self.SOURCE.copy(location)
         py_compile.compile(str(dst))
+        return dst
 
 
 class TestsForPurePythonLoaders(TestsForLoaderInCategory):
@@ -251,7 +259,7 @@ class TestsForPyLoader(TestsForPurePythonLoaders):
 
 
 @in_category('no_py')
-class SetsUpNoPyFixture(SetsUpFixture):
+class SetsUpNoPyFixture(SetsUpPyAndPycFixture):
     SOURCE = FIXTURES_SOURCE.join('no_py.py')
     TARGET_FN = 'no_py.pyc'
     module_name = 'no_py'
@@ -269,9 +277,7 @@ class SetsUpNoPyFixture(SetsUpFixture):
         bytecode.copy(target)
 
     def install(self, location):
-        dst = location.join(self.SOURCE.basename)
-        self.SOURCE.copy(location)
-        py_compile.compile(str(dst))
+        dst = super(SetsUpNoPyFixture, self).install(location)
 
         if not IS_PYTHON_27:
             self._rename_python3_bytecode(dst)
@@ -320,6 +326,31 @@ class TestsForExtensionModule(TestsForLoaderInCategory):
 
     def assert_module_dot_files_equal(self, loaded, actual):
         pass
+
+
+@in_category('bad_pyc')
+class SetsUpPycWithBadMagicNumber(SetsUpNoPyFixture):
+    module_name = 'pyc_with_bad_magic_number'
+    SOURCE = FIXTURES_SOURCE.join('pyc_with_bad_magic_number.py')
+    TARGET_FN = 'pyc_with_bad_magic_number.pyc'
+
+    def path(self, directory):
+        path = super(SetsUpPycWithBadMagicNumber, self).path(directory)
+        if path.exists():
+            path.remove()
+        return path
+
+    def load(self, directory, path, lineage):
+        mod = super(SetsUpPycWithBadMagicNumber, self).load(directory,
+                                                            path,
+                                                            lineage)
+        path.open('w')
+        return mod
+
+
+@in_category('bad_pyc')
+class TestsForPycWithBadMagicNumber(TestsForLoaderInCategory):
+    should_fail = True
 
 
 def set_up_fixtures(root, lineage=LINEAGE):
