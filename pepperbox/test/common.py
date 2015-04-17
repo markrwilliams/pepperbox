@@ -42,7 +42,6 @@ def generate_py_tag():
 PY_TAG = generate_py_tag()
 
 FIXTURES_SOURCE = py.path.local(__file__).dirpath('fixtures_src')
-LINEAGE = ('a', 'b', 'c', 'd')
 
 
 class ModuleFixture(namedtuple('ModuleFixture',
@@ -103,25 +102,26 @@ class LoadModuleOrPackage(object):
             sys.modules.pop(name, None)
 
 FIXTURE = 'FIXTURE'
-LOADER = 'LOADER'
+LOADER_TESTS = 'LOADER_TESTS'
 
 CATEGORIES = frozenset(['package',
                         'py_and_pyc',
                         'no_py',
                         'extension_module',
                         'bad_pyc'])
-CATEGORIES_TABLE = {k: {FIXTURE: [],
-                        LOADER: []}
+
+CATEGORIES_TABLE = {k: {FIXTURE: None,
+                        LOADER_TESTS: []}
                     for k in CATEGORIES}
 
 
-def in_category(name):
+def in_category(name, **kwargs):
     assert name in CATEGORIES
 
     def in_category(cls):
         categories = getattr(cls, 'categories', ())
         cls.categories = categories + (name,)
-        CATEGORIES_TABLE[name][cls.kind].append(cls)
+        cls.add_to_category(CATEGORIES_TABLE, name, **kwargs)
         return cls
     return in_category
 
@@ -131,6 +131,17 @@ class SetsUpFixture(object):
     SOURCE = None
     TARGET_FN = None
     module_name = None
+
+    _fixture = None
+
+    def __init__(self, root, directory, lineage):
+        self.root = root
+        self.directory = directory
+        self.lineage = lineage
+
+    @classmethod
+    def add_to_category(cls, table, name, **kwargs):
+        table[name][FIXTURE] = cls
 
     def create(self):
         pass
@@ -160,28 +171,43 @@ class SetsUpFixture(object):
                                  module_or_package) as mop:
             return mop
 
-    def __call__(self, root, directory, lineage):
-        self.ensure(directory, bool(lineage))
-        path = self.path(directory)
+    def __call__(self):
+        if self._fixture:
+            return self._fixture
+
+        self.ensure(self.directory, bool(self.lineage))
+        path = self.path(self.directory)
         if not path.exists():
             self.create()
-            self.install(directory)
-        module = self.load(root, path, lineage)
+            self.install(self.directory)
+        module = self.load(self.root, path, self.lineage)
 
         if self.module_name is None:
-            module_name = lineage[-1]
+            module_name = self.lineage[-1]
         else:
             module_name = self.module_name
 
-        return ModuleFixture(module_name,
-                             self.categories,
-                             module,
-                             path)
+        self._fixture = ModuleFixture(module_name,
+                                      self.categories,
+                                      module,
+                                      path)
+        return self._fixture
+
+    def __repr__(self):
+        cn = self.__class__.__name__
+        return '{}(root={}, directory={}, lineage={})'.format(
+            cn, self.root, self.directory, self.lineage)
 
 
 class TestsForLoaderInCategory(object):
-    kind = LOADER
+    kind = LOADER_TESTS
     loader = None
+    should_fail = False
+    this_version = True
+
+    @classmethod
+    def add_to_category(cls, table, name, **kwarg):
+        table[name][LOADER_TESTS].append(cls)
 
     @classmethod
     def reset(cls):
@@ -348,32 +374,51 @@ class SetsUpPycWithBadMagicNumber(SetsUpNoPyFixture):
         return mod
 
 
+@in_category('package')
+@in_category('py_and_pyc')
+class TestsForTryPycThenPyLoader(TestsForPyCompiledLoader):
+    this_version = IS_PYTHON_27
+
+
 @in_category('bad_pyc')
 class TestsForPycWithBadMagicNumber(TestsForLoaderInCategory):
     should_fail = True
+    this_version = IS_PYTHON_27
 
 
-def set_up_fixtures(root, lineage=LINEAGE):
-    modules_by_category = {}
+def all_lineages(deepest_lineage):
+    generations = deepest_lineage.split('.')
+    return [tuple(generations[:i]) for i in range(len(generations) + 1)]
 
-    def establish_fixtures(category, directory, lineage):
-        fixture = CATEGORIES_TABLE[category][FIXTURE][0]()
-        modules_by_category.setdefault(category, []).append(
-            fixture(root, directory, lineage))
 
-    top_level_fixtures = CATEGORIES - set(['package'])
+def category_fixture_loaders(root, directory, lineage):
+    if not lineage:
+        # top level fixtures
+        relevant_categories = CATEGORIES - set(['package'])
+    else:
+        relevant_categories = CATEGORIES
 
-    for category in top_level_fixtures:
-        establish_fixtures(category,
-                           directory=root,
-                           lineage=())
+    category_fixture_loaders = []
+    for category in relevant_categories:
+        for loader_tests in CATEGORIES_TABLE[category][LOADER_TESTS]:
+            if not loader_tests.this_version:
+                continue
 
-    directory = root
-    for i, name in enumerate(lineage, 1):
-        directory = directory.join(name)
-        current_lineage = lineage[:i]
+            fixture_setup = CATEGORIES_TABLE[category][FIXTURE](root,
+                                                                directory,
+                                                                lineage)
+            category_fixture_loaders.append(
+                (category, fixture_setup, loader_tests))
+    return category_fixture_loaders
 
-        for category in CATEGORIES:
-            establish_fixtures(category, directory, current_lineage)
 
-    return modules_by_category
+def gen_category_fixture_loaders(fixture_dir, deepest_lineage):
+    all_category_fixture_loaders = []
+    root = py.path.local(fixture_dir)
+
+    for lineage in all_lineages(deepest_lineage):
+        directory = root.join(*lineage)
+        all_category_fixture_loaders.extend(category_fixture_loaders(root,
+                                                                     directory,
+                                                                     lineage))
+    return all_category_fixture_loaders

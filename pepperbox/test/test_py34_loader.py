@@ -1,12 +1,10 @@
 import pytest
 from pepperbox.support import DirectoryFD
 from .common import (only_py34,
-                     CATEGORIES, CATEGORIES_TABLE, LOADER,
                      track_tests, reset_tests,
                      TestsForPyLoader,
                      TestsForPyCompiledLoader,
-                     TestsForExtensionModule,
-                     LoadModuleOrPackage)
+                     TestsForExtensionModule)
 
 pytestmark = only_py34
 
@@ -24,20 +22,20 @@ def setup_module(module):
 teardown_module = reset_tests
 
 
-@pytest.mark.parametrize('category', CATEGORIES - set(['bad_pyc']))
-def test_loaders_succeed(modules_by_category, category):
+@pytest.mark.parametrize('category, setup_fixture, loader_tests',
+                         pytest.pepperbox_loader_table)
+def test_loaders(category, setup_fixture, loader_tests):
+    fixture = setup_fixture()
+
     is_package = category == 'package'
+    name = fixture.module.__name__
+    path = fixture.path
+    parent = str(path.pypkgpath() or path.join('..'))
+    tests = loader_tests(is_empty=is_package)
 
-    for fixture in modules_by_category.get(category, ()):
-        for tests_for_loader in CATEGORIES_TABLE[category][LOADER]:
-            name = fixture.module.__name__
-            path = fixture.path
-            parent = str(path.pypkgpath() or path.join('..'))
-            tests = tests_for_loader(is_empty=is_package)
+    loader = tests.loader(name,
+                          str(path),
+                          DirectoryFD(parent))
 
-            loader = tests.loader(name,
-                                  str(path),
-                                  DirectoryFD(parent))
-
-            loaded_module = loader.load_module(name)
-            tests.assert_modules_equal(loaded_module, fixture.module)
+    loaded_module = loader.load_module(name)
+    tests.assert_modules_equal(loaded_module, fixture.module)
