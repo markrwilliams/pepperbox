@@ -38,4 +38,13 @@ def test_loaders(category, setup_fixture, loader_tests):
                           DirectoryFD(parent))
 
     loaded_module = loader.load_module(name)
+
     tests.assert_modules_equal(loaded_module, fixture.module)
+
+    if category == 'extension_module':
+        # TODO: this doesn't test what it appears to because the two
+        # modules inevitably share the same backing .so.  python never
+        # calls dlclose on sos it's dlopened, so to properly test
+        # per-module state, it's likely necessary that the fixture
+        # module not be loaded prior to the test!
+        loaded_module.test_state() == fixture.module.test_state()
