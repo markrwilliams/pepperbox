@@ -101,33 +101,34 @@ class LoadModuleOrPackage(object):
         for name in self.to_uncache:
             sys.modules.pop(name, None)
 
-FIXTURE = 'FIXTURE'
-LOADER_TESTS = 'LOADER_TESTS'
-
 CATEGORIES = frozenset(['package',
                         'py_and_pyc',
                         'no_py',
                         'extension_module',
                         'bad_pyc'])
 
-CATEGORIES_TABLE = {k: {FIXTURE: None,
-                        LOADER_TESTS: []}
-                    for k in CATEGORIES}
+FIXTURE_SETUPS = {}
+LOADER_TESTS = {}
 
 
 def in_category(name, **kwargs):
     assert name in CATEGORIES
 
     def in_category(cls):
+        if issubclass(cls, SetsUpFixture):
+            FIXTURE_SETUPS[name] = cls
+        elif issubclass(cls, TestsForLoaderInCategory):
+            LOADER_TESTS.setdefault(name, []).append(cls)
+        else:
+            raise AssertionError("unknown type {}".format(cls))
+
         categories = getattr(cls, 'categories', ())
         cls.categories = categories + (name,)
-        cls.add_to_category(CATEGORIES_TABLE, name, **kwargs)
         return cls
     return in_category
 
 
 class SetsUpFixture(object):
-    kind = FIXTURE
     SOURCE = None
     TARGET_FN = None
     module_name = None
@@ -138,10 +139,6 @@ class SetsUpFixture(object):
         self.root = root
         self.directory = directory
         self.lineage = lineage
-
-    @classmethod
-    def add_to_category(cls, table, name, **kwargs):
-        table[name][FIXTURE] = cls
 
     def create(self):
         pass
@@ -200,7 +197,6 @@ class SetsUpFixture(object):
 
 
 class TestsForLoaderInCategory(object):
-    kind = LOADER_TESTS
     loader = None
     should_fail = False
     this_version = True
@@ -400,13 +396,11 @@ def category_fixture_loaders(root, directory, lineage):
 
     category_fixture_loaders = []
     for category in relevant_categories:
-        for loader_tests in CATEGORIES_TABLE[category][LOADER_TESTS]:
+        for loader_tests in LOADER_TESTS[category]:
             if not loader_tests.this_version:
                 continue
 
-            fixture_setup = CATEGORIES_TABLE[category][FIXTURE](root,
-                                                                directory,
-                                                                lineage)
+            fixture_setup = FIXTURE_SETUPS[category](root, directory, lineage)
             category_fixture_loaders.append(
                 (category, fixture_setup, loader_tests))
     return category_fixture_loaders
