@@ -1,6 +1,6 @@
 import py.path
 import pytest
-from .common import gen_category_fixture_loaders
+from ._test_loaders_support import gen_category_fixture_loaders
 
 
 def pytest_namespace():

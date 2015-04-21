@@ -4,6 +4,32 @@ import stat
 import sys
 
 
+def generate_py_tag():
+    """like sys.implementation.cache_tag, except:
+
+    1) it's in Python 2
+
+    2) it's a valid Python identifier, so it can be used in module names
+
+    https://www.python.org/dev/peps/pep-0421/#required-attributes
+    """
+
+    if hasattr(sys, 'implementation'):
+        name = sys.implementation.name
+    elif hasattr(sys, 'subversion'):
+        name, _, _ = sys.subversion
+    else:
+        raise RuntimeError("Could not discover interpreter name")
+
+    name = name.lower()
+    version = '{}{}'.format(*sys.version_info[:2])
+
+    return '{}_{}'.format(name, version)
+
+
+PY_TAG = generate_py_tag()
+
+
 if sys.version_info.major > 2:
     from .py34 import support
 else:
