@@ -116,9 +116,6 @@ class DirectoryFD(object):
     def closed(self):
         return self._dirobj.closed
 
-    def __del__(self):
-        self.close()
-
 
 class _Py_PackageContext(object):
     """A ctypes implementation of _Py_PackageContext switching, which
