@@ -19,19 +19,27 @@ CATEGORIES = frozenset(['package',
                         'py_and_pyc',
                         'no_py',
                         'extension_module',
+                        'py_with_out_of_date_pyc',
+                        'pyc_with_bad_magic_number',
+                        'pyc_with_bad_mtime',
                         'missing_py',
                         'inaccessible_py',
                         'missing_pyc',
                         'inaccessible_pyc',
                         'missing_extension',
-                        'inaccessible_extension',
-                        'bad_pyc'])
+                        'inaccessible_extension'])
+
+
+only_for_loaders = pytest.mark.only_for_loaders
 
 
 def fixture_for(category):
     assert category in CATEGORIES
 
     def wrapper(cls):
+        # none of our fixture classes should inherit marks.  this
+        # gives us greater control over when they run
+        cls.pytestmark = []
         FIXTURE_SETUPS[category] = cls
         return cls
 
@@ -44,6 +52,9 @@ def loader_tests_for(*categories):
     assert not (set(categories) - CATEGORIES)
 
     def wrapper(cls):
+        # none of our test classes should inherit marks.  this gives
+        # us greater control over when they run
+        cls.pytestmark = []
         for category in categories:
             LOADER_TESTS.setdefault(category, []).append(cls)
         return cls
@@ -60,24 +71,35 @@ def _skipif_istrue(mark):
     return mark.name == 'skipif' and mark.args[0]
 
 
-def _check_class_skipifs(cls):
-    return any(_skipif_istrue(m) for m in getattr(cls, 'pytestmark', ()))
+def _has_only_for_loaders(mark):
+    thing = mark.name == only_for_loaders.name
+    return thing
 
 
-def category_fixture_loaders(root, directory, lineage):
+def _eval_class_marks(mark_eval, cls):
+    return any(mark_eval(m) for m in getattr(cls, 'pytestmark', ()))
+
+
+def category_fixture_loaders(root, directory, lineage, only_for_loaders):
     if not lineage:
         # top level fixtures
         relevant_categories = CATEGORIES - set(['package'])
     else:
         relevant_categories = CATEGORIES
 
+    def should_skip(cls):
+        skipif = _eval_class_marks(_skipif_istrue, cls)
+        if only_for_loaders:
+            return skipif or _eval_class_marks(_has_only_for_loaders,
+                                               cls)
+        return skipif
+
     category_fixture_loaders = []
     for category in relevant_categories:
         for loader_tests in LOADER_TESTS[category]:
             fixture_setup_cls = FIXTURE_SETUPS[category]
 
-            if (_check_class_skipifs(loader_tests) or
-               _check_class_skipifs(fixture_setup_cls)):
+            if should_skip(loader_tests) or should_skip(fixture_setup_cls):
                 continue
 
             fixture_setup = fixture_setup_cls(root, directory, lineage)
@@ -86,26 +108,35 @@ def category_fixture_loaders(root, directory, lineage):
     return category_fixture_loaders
 
 
-def gen_category_fixture_loaders(fixture_dir, deepest_lineage):
+def gen_category_fixture_loaders(fixture_dir, deepest_lineage,
+                                 only_for_loaders):
     all_category_fixture_loaders = []
     root = py.path.local(fixture_dir)
 
     for lineage in all_lineages(deepest_lineage):
         directory = root.join(*lineage)
-        all_category_fixture_loaders.extend(category_fixture_loaders(root,
-                                                                     directory,
-                                                                     lineage))
+        cfls = category_fixture_loaders(root,
+                                        directory,
+                                        lineage,
+                                        only_for_loaders)
+
+        all_category_fixture_loaders.extend(cfls)
     return all_category_fixture_loaders
 
 
 def pytest_generate_tests(metafunc):
-    if not hasattr(metafunc.function, 'parametrize_loader_tests'):
+    if hasattr(metafunc.function, 'parametrize_loader_tests'):
+        only_loader_tests = False
+    elif hasattr(metafunc.function, 'parametrize_finder_tests'):
+        only_loader_tests = True
+    else:
         return
+
     config = metafunc.config
     fixture_dir = py.path.local(config.getoption('fixture_dir'))
     lineage = config.getoption('lineage')
-    loader_table = gen_category_fixture_loaders(fixture_dir, lineage)
-
+    loader_table = gen_category_fixture_loaders(fixture_dir, lineage,
+                                                only_loader_tests)
     metafunc.parametrize('category, setup_fixture, loader_tests',
                          loader_table)
 
@@ -264,6 +295,9 @@ class TestsForLoaderInCategory(_GetAttributeForVersion):
     def __init__(self, is_package=False):
         self.is_package = is_package
 
+    def desired_path(self, path):
+        return str(path)
+
     def assert_modules_equal(self, loaded, expected):
         if not self.is_package:
             assert loaded.contents == expected.contents
@@ -302,6 +336,7 @@ class TestsForPurePythonLoaders(TestsForLoaderInCategory):
         assert loaded_p.purebasename == actual_p.purebasename
 
 
+@only_for_loaders
 @loader_tests_for('package', 'py_and_pyc')
 class TestsForPyLoader(TestsForPurePythonLoaders):
 
@@ -315,6 +350,14 @@ class TestsForPyLoader(TestsForPurePythonLoaders):
         super(TestsForPyLoader, self).assert_module_dot_files_equal(loaded,
                                                                     expected)
         assert py.path.local(loaded.__file__).ext == '.py'
+
+
+@only_py27
+@loader_tests_for('package', 'py_and_pyc')
+class TestsForTryPycThenPyLoader(TestsForPurePythonLoaders):
+
+    def _cpython_27_loader_cls(self):
+        return self._loader_module.TryPycThenPyOpenatLoader
 
 
 @fixture_for('no_py')
@@ -396,38 +439,46 @@ class TestsForExtensionModule(TestsForLoaderInCategory):
 
 
 @only_py27
-@fixture_for('bad_pyc')
-class SetsUpPycWithBadMagicNumber(SetsUpNoPyFixture):
-    module_name = 'pyc_with_bad_magic_number'
-    SOURCE = FIXTURES_SOURCE.join('pyc_with_bad_magic_number.py')
-    TARGET_FN = 'pyc_with_bad_magic_number.pyc'
+@fixture_for('py_with_out_of_date_pyc')
+class SetsUpPyWithOutOfDatePyc(SetsUpPyAndPycFixture):
+    module_name = 'py_with_out_of_date_pyc'
+
+    TARGET_FN = 'py_with_out_of_date_pyc.py'
+    PYC_FN = TARGET_FN.replace('.py', '.pyc')
+
+    SOURCE = FIXTURES_SOURCE.join(TARGET_FN)
 
     def path(self, directory):
-        path = super(SetsUpPycWithBadMagicNumber, self).path(directory)
-        if path.exists():
+        path = super(SetsUpPyWithOutOfDatePyc, self).path(directory)
+        pyc = self.directory.join(self.PYC_FN)
+        if path.exists() and path.mtime() < pyc.mtime():
             path.remove()
         return path
 
-    def load(self, directory, path, lineage):
-        mod = super(SetsUpPycWithBadMagicNumber, self).load(directory,
-                                                            path,
-                                                            lineage)
-        path.open('w')
-        return mod
+    def load(self, directory, filepath, lineage):
+        mop = super(SetsUpPyWithOutOfDatePyc, self).load(directory,
+                                                         filepath,
+                                                         lineage)
+        # TODO: THIS TEST WILL FAIL WITH CRAZY CLOCK SKEW!!
+        filepath.setmtime(filepath.mtime() + 123123123)
+        return mop
 
 
 @only_py27
-@loader_tests_for('package', 'py_and_pyc')
-class TestsForTryPycThenPyLoader(TestsForPurePythonLoaders):
-
-    def _cpython_27_loader_cls(self):
-        return self._loader_module.TryPycThenPyOpenatLoader
-
-
-@only_py27
-@loader_tests_for('bad_pyc')
-class TestsForPycWithBadMagicNumber(TestsForPyCompiledLoader):
+@only_for_loaders
+@loader_tests_for('py_with_out_of_date_pyc')
+class TestsForPyCompiledWithOutOfDatePyc(TestsForPyCompiledLoader):
     raises = ImportError
+
+    def desired_path(self, path):
+        return str(path).replace('.py', '.pyc')
+
+
+@only_py27
+@only_for_loaders
+@loader_tests_for('py_with_out_of_date_pyc')
+class TestsForTryPycThenPyLoaderWithOutOfDatePyc(TestsForTryPycThenPyLoader):
+    pass
 
 
 class SetsUpMissingFixture(SetsUpFixture):
@@ -435,6 +486,42 @@ class SetsUpMissingFixture(SetsUpFixture):
     def load(self, directory, filepath, lineage):
         dotted_path = '.'.join(chain(lineage, [self.module_name]))
         return imp.new_module(dotted_path)
+
+
+@only_py27
+@fixture_for('pyc_with_bad_magic_number')
+class SetsUpPycWithBadMagicNumber(SetsUpMissingFixture):
+    module_name = 'pyc_with_bad_magic_number'
+    TARGET_FN = 'pyc_with_bad_magic_number.pyc'
+
+    def install(self, location):
+        with location.join(self.TARGET_FN).open('w'):
+            pass
+
+
+@only_py27
+@only_for_loaders
+@loader_tests_for('pyc_with_bad_magic_number')
+class TestsForPycWithBadMagicNumber(TestsForPyCompiledLoader):
+    raises = ImportError
+
+
+@only_py27
+@fixture_for('pyc_with_bad_mtime')
+class SetsUpPycWithBadMtime(SetsUpMissingFixture):
+    module_name = 'pyc_with_bad_mtime'
+    TARGET_FN = 'pyc_with_bad_mtime.pyc'
+
+    def install(self, location):
+        with location.join(self.TARGET_FN).open('w') as f:
+            f.write(imp.get_magic())
+
+
+@only_py27
+@only_for_loaders
+@loader_tests_for('pyc_with_bad_mtime')
+class TestsForPycWithBadMtime(TestsForPyCompiledLoader):
+    raises = EOFError
 
 
 class SetsUpInaccessibleFixture(SetsUpMissingFixture):
@@ -480,24 +567,28 @@ class TestsForPyLoaderMissingFile(TestsForPyLoader):
 
 
 @only_py27
+@only_for_loaders
 @loader_tests_for('missing_py', 'missing_pyc')
 class TestsForTryPycThenPyLoaderMissingFile(TestsForTryPycThenPyLoader):
     raises = ImportError
 
 
 @only_py27
+@only_for_loaders
 @loader_tests_for('inaccessible_py', 'inaccessible_pyc')
 class TestsForTryPycThenPyLoaderInaccesibleFile(TestsForTryPycThenPyLoader):
     raises = OSError
 
 
 @only_py27
+@only_for_loaders
 @loader_tests_for('inaccessible_py')
 class TestsForPyLoaderInaccessibleFile(TestsForPyLoader):
     raises = OSError
 
 
 @only_py27
+@only_for_loaders
 @loader_tests_for('inaccessible_pyc')
 class TestsForPyCompiledLoaderInaccessibleFile(TestsForPyCompiledLoader):
     raises = OSError
@@ -511,6 +602,7 @@ class SetsUpMissingExtensionFixture(SetsUpMissingFixture):
 
 
 @only_py27
+@only_for_loaders
 @loader_tests_for('missing_extension')
 class TestsForExtensionModuleMissingFile(TestsForExtensionModule):
     raises = ImportError
@@ -524,6 +616,7 @@ class SetsUpInaccessibleExtensionFixture(SetsUpInaccessibleFixture):
 
 
 @only_py27
+@only_for_loaders
 @loader_tests_for('inaccessible_extension')
 class TestsForExtensionModuleInaccessbileFile(TestsForExtensionModule):
     raises = OSError
@@ -537,7 +630,7 @@ class TestsPy27Loader(object):
     def set_fixture_dir(cls, request):
         cls.fixture_dir = request.config.getoption('fixture_dir')
 
-    def walk_up_directory_tree(self, fixture):
+    def walk_up_directory_tree(self, path):
         # attempt to load a given module at all possible directory depths.
         #
         # so for a module /home/you/a/b/c/d.py
@@ -549,7 +642,7 @@ class TestsPy27Loader(object):
         #
         # this ensures that __name__ and __file__ are determined correctly
         # regardless of a module's location
-        head = str(fixture.path)
+        head = path
         args = ()
 
         while head and head != os.path.sep:
@@ -561,15 +654,14 @@ class TestsPy27Loader(object):
             dirobj = DirectoryFD(head)
             yield dirobj, tail
 
-    def _load_module(self, loader, fixture):
+    def _load_module(self, loader, fixture, path):
         name = fixture.module.__name__
         if fixture.package:
             # because of the particulars of setting module.__package__,
             # we need to make sure the immediate parents of this
             # module or package are available in sys.modules
-
             with LoadModuleOrPackage(str(self.fixture_dir),
-                                     str(fixture.path),
+                                     path,
                                      fixture.package):
                 return loader.load_module(name)
         return loader.load_module(name)
@@ -579,7 +671,9 @@ class TestsPy27Loader(object):
         fixture = setup_fixture()
         is_package = category == 'package'
         tests = loader_tests(is_package)
-        for dirobj, tail in self.walk_up_directory_tree(fixture):
+        path = tests.desired_path(fixture.path)
+
+        for dirobj, tail in self.walk_up_directory_tree(path):
             this_loader = tests.loader_cls(dirobj, tail, is_package)
 
             if is_package:
@@ -587,10 +681,53 @@ class TestsPy27Loader(object):
 
             if tests.raises:
                 with pytest.raises(tests.raises):
-                    self._load_module(this_loader, fixture)
+                    self._load_module(this_loader, fixture, path)
             else:
-                module = self._load_module(this_loader, fixture)
+                module = self._load_module(this_loader, fixture, path)
                 tests.assert_modules_equal(module, fixture.module)
+
+    def test_finder_checks_relevance(self, tmpdir):
+        from pepperbox.py27.loader import OpenatFileFinder
+        bad_path = tmpdir.join('a')
+        bad_path.ensure(dir=True)
+
+        with pytest.raises(ImportError):
+            OpenatFileFinder(str(tmpdir), rights=())(str(bad_path))
+
+    def test_finder_skips_builtins(self, tmpdir):
+        from pepperbox.py27.loader import OpenatFileFinder
+
+        mod = OpenatFileFinder(str(tmpdir), rights=()).find_module('sys')
+        assert mod is None
+
+    def test_finder_repr(self, tmpdir):
+        from pepperbox.py27.loader import OpenatFileFinder
+        repr(OpenatFileFinder(str(tmpdir), rights=()))
+
+    @pytest.mark.parametrize_finder_tests
+    def test_py27_finder(self, category, setup_fixture, loader_tests):
+        from pepperbox.py27.loader import OpenatFileFinder
+
+        fixture = setup_fixture()
+        tests = loader_tests()
+
+        finder = OpenatFileFinder(str(self.fixture_dir),
+                                  rights=())
+
+        module_name = fixture.module.__name__
+        package = fixture.package
+
+        if not package:
+            loader = finder.find_module(module_name)
+        else:
+            parent_package = package.rpartition('.')[-1]
+            package_path = fixture.path.pypkgpath(parent_package)
+            loader = finder.find_module(module_name, path=[str(package_path)])
+
+        if tests.raises:
+            assert loader is None
+        else:
+            assert isinstance(loader, tests.loader_cls)
 
 
 @only_py34

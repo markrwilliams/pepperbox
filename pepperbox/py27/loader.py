@@ -193,9 +193,6 @@ class OpenatFileFinder(BaseOpenatFileFinder):
         if self.path != path:
             raise ImportError
 
-    def __str__(self):
-        return '<{} for {}">'.format(self.__class__.__name__, self.path)
-
     def _find_loader(self, dirobj, fullname):
         _, _, module = fullname.rpartition('.')
 
@@ -224,3 +221,6 @@ class OpenatFileFinder(BaseOpenatFileFinder):
             loader = self._find_loader(dirobj, fullname)
             if loader:
                 return loader
+
+    def __repr__(self):
+        return '<{} for {}">'.format(self.__class__.__name__, self.path)
