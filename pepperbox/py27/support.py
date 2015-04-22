@@ -20,15 +20,6 @@ class _DirectoryFD(util.directory):
     def stat(self, path):
         return fs.fstatat(self.fileno(), path)
 
-    def exists(self, path):
-        try:
-            self.stat(path)
-        except OSError as e:
-            if e.errno == errno.ENOENT:
-                return False
-            raise
-        return True
-
 
 def _opendir(path, func):
     flags = (os.O_RDONLY | os.O_DIRECTORY)
