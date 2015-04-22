@@ -72,7 +72,7 @@ def _skipif_istrue(mark):
 
 
 def _has_only_for_loaders(mark):
-    thing = mark.name == only_for_loaders.name
+    thing = mark.name == only_for_loaders.name and all(mark.args)
     return thing
 
 
@@ -336,7 +336,7 @@ class TestsForPurePythonLoaders(TestsForLoaderInCategory):
         assert loaded_p.purebasename == actual_p.purebasename
 
 
-@only_for_loaders
+@only_for_loaders(IS_PYTHON_27)
 @loader_tests_for('package', 'py_and_pyc')
 class TestsForPyLoader(TestsForPurePythonLoaders):
 
@@ -756,3 +756,32 @@ def test_py34_loaders(category, setup_fixture, loader_tests):
         # per-module state, it's likely necessary that the fixture
         # module not be loaded prior to the test!
         loaded_module.test_state() == fixture.module.test_state()
+
+
+@only_py34
+@pytest.mark.parametrize_finder_tests
+def test_py34_finder(category, setup_fixture, loader_tests, pytestconfig):
+    from pepperbox.py34.loader import OpenatFileFinder
+
+    fixture_dir = pytestconfig.getoption('fixture_dir')
+
+    fixture = setup_fixture()
+    tests = loader_tests()
+
+    finder = OpenatFileFinder(str(fixture_dir),
+                              rights=())
+
+    module_name = fixture.module.__name__
+    package = fixture.package
+
+    if not package:
+        spec = finder.find_spec(module_name)
+    else:
+        parent_package = package.rpartition('.')[-1]
+        package_path = fixture.path.pypkgpath(parent_package)
+        spec = finder.find_spec(module_name, path=[str(package_path)])
+
+    if tests.raises:
+        assert spec is None
+
+    assert isinstance(spec.loader, tests.loader_cls)
