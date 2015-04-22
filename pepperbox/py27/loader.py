@@ -178,6 +178,10 @@ class RTLDOpenatLoader(OpenatLoader):
 
                 m.__file__ = __file__
                 return m
+        except OSError as e:
+            if e.errno != errno.ENOENT:
+                raise
+            raise ImportError(e)
         finally:
             gc.enable()
 

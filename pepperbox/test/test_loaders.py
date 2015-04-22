@@ -1,12 +1,14 @@
-import pytest
-import os
+from collections import namedtuple
+from itertools import chain
+import imp
 import importlib
+import os
+import py_compile
 import subprocess
 import sys
-from collections import namedtuple
-import imp
+
+import pytest
 import py.path
-import py_compile
 
 from ..support import PY_TAG, DirectoryFD
 from .common import IS_PYTHON_27, only_py27, only_py34
@@ -17,6 +19,12 @@ CATEGORIES = frozenset(['package',
                         'py_and_pyc',
                         'no_py',
                         'extension_module',
+                        'missing_py',
+                        'inaccessible_py',
+                        'missing_pyc',
+                        'inaccessible_pyc',
+                        'missing_extension',
+                        'inaccessible_extension',
                         'bad_pyc'])
 
 
@@ -197,7 +205,7 @@ class SetsUpFixture(object):
     def path(self, directory):
         return directory.join(self.TARGET_FN)
 
-    def install(self, directory, path):
+    def install(self, local):
         pass
 
     def load(self, directory, filepath, lineage):
@@ -240,7 +248,7 @@ class SetsUpFixture(object):
 
 
 class TestsForLoaderInCategory(_GetAttributeForVersion):
-    raises = ()
+    raises = None
 
     _cpython_27_loader = 'pepperbox.py27.loader'
     _cpython_34_loader = 'pepperbox.py34.loader'
@@ -253,11 +261,11 @@ class TestsForLoaderInCategory(_GetAttributeForVersion):
     def loader_cls(self):
         return self._attribute_for_version('loader_cls')()
 
-    def __init__(self, is_empty=False):
-        self.is_empty = is_empty
+    def __init__(self, is_package=False):
+        self.is_package = is_package
 
     def assert_modules_equal(self, loaded, expected):
-        if not self.is_empty:
+        if not self.is_package:
             assert loaded.contents == expected.contents
         assert loaded.__name__ == expected.__name__
         assert loaded.__package__ == expected.__package__
@@ -419,11 +427,115 @@ class TestsForTryPycThenPyLoader(TestsForPurePythonLoaders):
 @only_py27
 @loader_tests_for('bad_pyc')
 class TestsForPycWithBadMagicNumber(TestsForPyCompiledLoader):
-    raises = (ImportError,)
+    raises = ImportError
+
+
+class SetsUpMissingFixture(SetsUpFixture):
+
+    def load(self, directory, filepath, lineage):
+        dotted_path = '.'.join(chain(lineage, [self.module_name]))
+        return imp.new_module(dotted_path)
+
+
+class SetsUpInaccessibleFixture(SetsUpMissingFixture):
+
+    def install(self, location):
+        target = location.join(self.TARGET_FN)
+        target.ensure()
+        target.chmod(0)
+
+
+@only_py27
+@fixture_for('missing_py')
+class SetsUpMissingPyFixture(SetsUpMissingFixture):
+    module_name = 'missing_py'
+    TARGET_FN = 'missing_py.py'
+
+
+@only_py27
+@fixture_for('missing_pyc')
+class SetsUpMissingPyCompiledFixture(SetsUpMissingFixture):
+    module_name = 'missing_py'
+    TARGET_FN = 'missing_py.pyc'
+
+
+@only_py27
+@fixture_for('inaccessible_py')
+class SetsUpInaccessiblePyFixture(SetsUpInaccessibleFixture):
+    module_name = 'inaccessible_py'
+    TARGET_FN = 'inaccessible_py.py'
+
+
+@only_py27
+@fixture_for('inaccessible_pyc')
+class SetsUpInaccessiblePyCompiledFixture(SetsUpInaccessibleFixture):
+    module_name = 'inaccessible_pyc'
+    TARGET_FN = 'inaccessible_pyc.pyc'
+
+
+@only_py27
+@loader_tests_for('missing_py')
+class TestsForPyLoaderMissingFile(TestsForPyLoader):
+    raises = ImportError
+
+
+@only_py27
+@loader_tests_for('missing_py', 'missing_pyc')
+class TestsForTryPycThenPyLoaderMissingFile(TestsForTryPycThenPyLoader):
+    raises = ImportError
+
+
+@only_py27
+@loader_tests_for('inaccessible_py', 'inaccessible_pyc')
+class TestsForTryPycThenPyLoaderInaccesibleFile(TestsForTryPycThenPyLoader):
+    raises = OSError
+
+
+@only_py27
+@loader_tests_for('inaccessible_py')
+class TestsForPyLoaderInaccessibleFile(TestsForPyLoader):
+    raises = OSError
+
+
+@only_py27
+@loader_tests_for('inaccessible_pyc')
+class TestsForPyCompiledLoaderInaccessibleFile(TestsForPyCompiledLoader):
+    raises = OSError
+
+
+@only_py27
+@fixture_for('missing_extension')
+class SetsUpMissingExtensionFixture(SetsUpMissingFixture):
+    module_name = 'cpython27_missingc'
+    TARGET_FN = 'cpython27_missingc.so'
+
+
+@only_py27
+@loader_tests_for('missing_extension')
+class TestsForExtensionModuleMissingFile(TestsForExtensionModule):
+    raises = ImportError
+
+
+@only_py27
+@fixture_for('inaccessible_extension')
+class SetsUpInaccessibleExtensionFixture(SetsUpInaccessibleFixture):
+    module_name = 'inaccessible_extensionc'
+    TARGET_FN = 'cpython27_inaccessible_extensionc.so'
+
+
+@only_py27
+@loader_tests_for('inaccessible_extension')
+class TestsForExtensionModuleInaccessbileFile(TestsForExtensionModule):
+    raises = OSError
 
 
 @only_py27
 class TestsPy27Loader(object):
+
+    @classmethod
+    @pytest.fixture(scope='class', autouse=True)
+    def set_fixture_dir(cls, request):
+        cls.fixture_dir = request.config.getoption('fixture_dir')
 
     def walk_up_directory_tree(self, fixture):
         # attempt to load a given module at all possible directory depths.
@@ -455,8 +567,8 @@ class TestsPy27Loader(object):
             # because of the particulars of setting module.__package__,
             # we need to make sure the immediate parents of this
             # module or package are available in sys.modules
-            package_parent = fixture.path.pypkgpath().dirname
-            with LoadModuleOrPackage(package_parent,
+
+            with LoadModuleOrPackage(str(self.fixture_dir),
                                      str(fixture.path),
                                      fixture.package):
                 return loader.load_module(name)
@@ -466,11 +578,15 @@ class TestsPy27Loader(object):
     def test_loaders(self, category, setup_fixture, loader_tests):
         fixture = setup_fixture()
         is_package = category == 'package'
-        tests = loader_tests(is_empty=is_package)
+        tests = loader_tests(is_package)
         for dirobj, tail in self.walk_up_directory_tree(fixture):
             this_loader = tests.loader_cls(dirobj, tail, is_package)
+
+            if is_package:
+                assert this_loader.is_package(fixture.module.__name__)
+
             if tests.raises:
-                with pytest.raises(*tests.raises):
+                with pytest.raises(tests.raises):
                     self._load_module(this_loader, fixture)
             else:
                 module = self._load_module(this_loader, fixture)
@@ -486,7 +602,7 @@ def test_py34_loaders(category, setup_fixture, loader_tests):
     name = fixture.module.__name__
     path = fixture.path
     parent = str(path.pypkgpath() or path.join('..'))
-    tests = loader_tests(is_empty=is_package)
+    tests = loader_tests(is_package)
 
     loader = tests.loader_cls(name,
                               str(path),
