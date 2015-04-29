@@ -12,15 +12,23 @@ from ..support import BaseOpenatFileFinder, _Py_PackageContext
 
 callable_with_gil = make_callable_with_gil(INITMODULEFUNC)
 
+MODULE_TYPE_TUPLES = tuple(imp.get_suffixes())
+SUFFIXES = {suffix for suffix, _, _ in MODULE_TYPE_TUPLES}
+
 
 class OpenatLoader(object):
-    def __init__(self, dirobj, relpath, is_package):
+    def __init__(self, fullname, path, dirobj):
+        self.name = fullname
+        self.path = path
         self.dirobj = dirobj
-        self.relpath = relpath
-        self._is_package = is_package
+
+    def get_filename(self, fullname):
+        return self.path
 
     def is_package(self, fullname):
-        return self._is_package
+        basename = os.path.basename(self.get_filename(fullname))
+        name, ext = os.path.splitext(basename)
+        return ext in SUFFIXES and name == '__init__'
 
     def _populate_module(self, module, fullname,
                          shortname):  # pragma: no cover
@@ -34,10 +42,10 @@ class OpenatLoader(object):
 
         package, _, module_name = fullname.rpartition('.')
 
-        module.__file__ = os.path.join(self.dirobj.name, self.relpath)
+        module.__file__ = self.path
         module.__name__ = fullname
 
-        if self._is_package:
+        if self.is_package(fullname):
             module.__path__ = [os.path.join(self.dirobj.name, module_name)]
 
         # setting __package__ in python 2 is weird.  __package__ is
@@ -64,7 +72,7 @@ class PyOpenatLoader(OpenatLoader):
     def _populate_module(self, module, fullname, shortname):
         sys.modules[fullname] = module
         try:
-            with self.dirobj.open(self.relpath) as f:
+            with self.dirobj.open(self.path) as f:
                 src = f.read()
         except OSError as e:
             if e.errno != errno.ENOENT:
@@ -96,7 +104,7 @@ class PyCompiledOpenatLoader(OpenatLoader):
             return None
 
     def _ensure_mtime_ok(self, mtime):
-        uncompiled = self.relpath.replace('.pyc', '.py')
+        uncompiled = self.path.replace('.pyc', '.py')
         try:
             stat = self.dirobj.stat(uncompiled)
         except OSError as e:
@@ -109,13 +117,13 @@ class PyCompiledOpenatLoader(OpenatLoader):
 
     def wrapped_load_module(self, fullname):
         try:
-            with self.dirobj.open(self.relpath) as f:
+            with self.dirobj.open(self.path) as f:
                 self.fileobj = f
                 magic = self._read_marshal_long(f)
                 if magic is None or magic != self.MAGIC:
                     raise LoadCompiledModuleFailure(
                         ImportError('Bad magic number in '
-                                    '{}'.format(self.relpath)))
+                                    '{}'.format(self.path)))
                 mtime = self._read_marshal_long(f)
                 if mtime is None:
                     raise LoadCompiledModuleFailure(EOFError())
@@ -145,7 +153,7 @@ class TryPycThenPyOpenatLoader(object):
     def __init__(self, *args, **kwargs):
         self.pyc_loader = PyCompiledOpenatLoader(*args, **kwargs)
         self.py_loader = PyOpenatLoader(*args, **kwargs)
-        self.pyc_loader.relpath = self.py_loader.relpath.replace('.py', '.pyc')
+        self.pyc_loader.path = self.py_loader.path.replace('.py', '.pyc')
 
     def __getattr__(self, attr):
         return getattr(self.py_loader, attr)
@@ -162,7 +170,7 @@ class RTLDOpenatLoader(OpenatLoader):
     def _populate_module(self, module, fullname, shortname):
         gc.disable()
         try:
-            with self.dirobj.open(self.relpath) as so:
+            with self.dirobj.open(self.path) as so:
                 so_fd = so.fileno()
                 loaded_so = fdlopen(so_fd, RTLD_NOW)
                 initmodule_pointer = dlsym(loaded_so, 'init%s' % shortname)
@@ -187,24 +195,27 @@ class RTLDOpenatLoader(OpenatLoader):
 
 
 class OpenatFileFinder(BaseOpenatFileFinder):
-    SUFFIXES = tuple(imp.get_suffixes())
 
     def __call__(self, path):
         if self.path != path:
             raise ImportError
 
     def _find_loader(self, dirobj, fullname):
-        _, _, module = fullname.rpartition('.')
+        components = fullname.split('.')
 
         if imp.is_builtin(fullname):
             return None
 
-        for suffix, mode, kind in self.SUFFIXES:
-            for additional, is_package in [((), False),
-                                           (('__init__',), True)]:
-                relpath = os.path.join(module, *additional) + suffix
-                if dirobj.exists(relpath):
-                    break
+        for suffix, mode, kind in MODULE_TYPE_TUPLES:
+            base_path = os.path.join(self.path, *components)
+
+            maybe_package = os.path.join(base_path, '__init__') + suffix
+            maybe_module = base_path + suffix
+
+            if dirobj.exists(maybe_package):
+                path = maybe_package
+            elif dirobj.exists(maybe_module):
+                path = maybe_module
             else:
                 continue
 
@@ -214,7 +225,7 @@ class OpenatFileFinder(BaseOpenatFileFinder):
                 loader = TryPycThenPyOpenatLoader
             elif kind == imp.PY_COMPILED:
                 loader = PyCompiledOpenatLoader
-            return loader(dirobj, relpath, is_package)
+            return loader(fullname, path, dirobj)
 
     def find_module(self, fullname, path=None):
         for dirobj in self.dirobjs_from_path(path):
