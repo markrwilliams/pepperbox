@@ -110,6 +110,11 @@ def fixture_dir(request):
     return path
 
 
+@pytest.fixture(scope='session', params=LINEAGES)
+def lineage(request):
+    return request.param
+
+
 def create_package(fixture_dir, lineage):
     target_dir = fixture_dir.join(*lineage)
     __init__ = None
@@ -126,14 +131,29 @@ def ensure_package(fixture_dir, lineage):
     return target_dir
 
 
-loader_fixture = pytest.fixture(scope='session', params=LINEAGES, ids=LINEAGES)
+def loader_fixture(f):
+    cache = {}
+
+    @functools.wraps(f)
+    def wrapped():
+
+        @functools.wraps(f)
+        def fixture(lineage, fixture_dir):
+            args = (lineage, str(fixture_dir))
+            cached = cache.get(args)
+            if not cached:
+                cache[args] = cached = f(*args)
+            return cached
+
+        return fixture
+
+    return pytest.fixture(scope='session')(wrapped)
 
 
 @loader_fixture
-def package(request, fixture_dir):
-    lineage = request.param
+def package(lineage, fixture_dir):
     if not lineage:
-        return pytest.skip("Irrelevant")
+        return pytest.skip("not installed into the top level directory")
 
     _, target_file = create_package(fixture_dir, lineage)
 
@@ -142,10 +162,8 @@ def package(request, fixture_dir):
 
 
 @loader_fixture
-def py_and_pyc(request, fixture_dir):
-    lineage = request.param
+def py_and_pyc(lineage, fixture_dir):
     target_dir = ensure_package(fixture_dir, lineage)
-
     target_file = target_dir.join('py_and_pyc.py')
 
     if not target_file.exists():
@@ -154,14 +172,13 @@ def py_and_pyc(request, fixture_dir):
     if not target_dir.join('py_and_pyc.pyc').exists():
         py_compile.compile(str(target_file))
 
-    module_path = list(lineage) + [request.fixturename]
+    module_path = list(lineage) + ['py_and_pyc']
 
     return ModuleFixture.for_fixture(fixture_dir, target_file, module_path)
 
 
 @loader_fixture
-def no_py(request, fixture_dir):
-    lineage = request.param
+def no_py(lineage, fixture_dir):
     target_dir = ensure_package(fixture_dir, lineage)
 
     pure_python = target_dir.join('no_py.py')
@@ -182,23 +199,24 @@ def no_py(request, fixture_dir):
             bytecode = py.path.local(cache_from_source(str(pure_python)))
             bytecode.copy(target_file)
 
-    module_path = list(lineage) + [request.fixturename]
+    module_path = list(lineage) + ['no_py']
 
     return ModuleFixture.for_fixture(fixture_dir, target_file, module_path)
 
 
 @loader_fixture
-def py_with_out_of_date_pyc(request, fixture_dir):
-    lineage = request.param
+def py_with_out_of_date_pyc(lineage, fixture_dir):
     target_dir = ensure_package(fixture_dir, lineage)
 
     pure_python = target_dir.join('py_with_out_of_date_pyc.py')
     target_file = py.path.local(str(pure_python).replace('.py', '.pyc'))
 
+    if not target_file.exists():
+
+
 
 @loader_fixture
-def extension_module(request, fixture_dir):
-    lineage = request.param
+def extension_module(lineage, fixture_dir):
     target_dir = ensure_package(fixture_dir, lineage)
 
     module_name = '{}c'.format(PY_TAG)
@@ -257,9 +275,30 @@ def extension_loader():
     return Loader
 
 
-@pytest.fixture(scope='session', params=['pure_python_loader',
-                                         'try_bytecode_then_python_loader'])
-def python_loaders(request):
+@pytest.fixture(scope='session',
+                params=['pure_python_loader',
+                        'try_bytecode_then_python_loader'])
+def python_loader_category(request):
+    return request.getfuncargvalue(request.param)
+
+
+@pytest.fixture(scope='session',
+                params=['try_bytecode_then_python_loader',
+                        'bytecode_loader'])
+def bytecode_loader_category(request):
+    return request.getfuncargvalue(request.param)
+
+
+@pytest.fixture(scope='session', params=['extension_loader'])
+def extension_loader_category(request):
+    return request.getfuncargvalue(request.param)
+
+
+@pytest.fixture(scope='session',
+                params=['package',
+                        'py_and_pyc',
+                        'no_py'])
+def python_test_module(request):
     return request.getfuncargvalue(request.param)
 
 
@@ -286,10 +325,16 @@ def MaybeLoadParentPackage(fixture_dir, fixture):
         yield
 
 
-def _test_python_loader(fixture_dir, Loader, fixture):
+def test_me(fixture_dir, lineage, python_loader, test_module):
+    print fixture_dir, lineage, python_loader, test_module
+
+
+def test_python_loaders(fixture_dir, python_loader, fixture):
     module_name = fixture.module.__name__
     directory = fixture.path.dirname
-    loader = Loader(module_name, str(fixture.path), DirectoryFD(directory))
+    loader = python_loader(module_name,
+                           str(fixture.path),
+                           DirectoryFD(directory))
 
     with MaybeLoadParentPackage(fixture_dir, fixture):
         module = loader.load_module(module_name)
@@ -299,101 +344,101 @@ def _test_python_loader(fixture_dir, Loader, fixture):
 
 
 def test_python_loaders_and_package(fixture_dir,
-                                    python_loaders,
+                                    python_loader,
                                     package):
-    _test_python_loader(fixture_dir, python_loaders, package)
+    _test_python_loader(fixture_dir, python_loader, package)
 
 
-def test_python_loaders_and_py_and_pyc(fixture_dir,
-                                       python_loaders,
-                                       py_and_pyc):
-    _test_python_loader(fixture_dir, python_loaders, py_and_pyc)
+# def test_python_loaders_and_py_and_pyc(fixture_dir,
+#                                        python_loader,
+#                                        py_and_pyc):
+#     _test_python_loader(fixture_dir, python_loader, py_and_pyc)
 
 
-def test_bytecode_loader(fixture_dir, bytecode_loader, no_py):
-    _test_python_loader(fixture_dir, bytecode_loader, no_py)
+# def test_bytecode_loader(fixture_dir, bytecode_loader, no_py):
+#     _test_python_loader(fixture_dir, bytecode_loader, no_py)
 
 
-def test_extension_loader(fixture_dir, extension_loader, extension_module):
-    _test_python_loader(fixture_dir, extension_loader, extension_module)
+# def test_extension_loader(fixture_dir, extension_loader, extension_module):
+#     _test_python_loader(fixture_dir, extension_loader, extension_module)
 
 
-def _test_module_finder(fixture_dir, Finder, fixture, Loader,
-                        should_fail=False):
-    module_name = fixture.module.__name__
-    package = fixture.package
+# def _test_module_finder(fixture_dir, Finder, fixture, Loader,
+#                         should_fail=False):
+#     module_name = fixture.module.__name__
+#     package = fixture.package
 
-    finder = Finder(str(fixture_dir), rights=())
+#     finder = Finder(str(fixture_dir), rights=())
 
-    if C.IS_PYTHON_27:
-        find_module = functools.partial(finder.find_module, module_name)
-        get_loader = lambda loader: loader
-    else:
-        # python 3.4 has specs, so we have to have some indirection
-        find_module = functools.partial(finder.find_spec, module_name)
-        get_loader = operator.attrgetter('loader')
+#     if C.IS_PYTHON_27:
+#         find_module = functools.partial(finder.find_module, module_name)
+#         get_loader = lambda loader: loader
+#     else:
+#         # python 3.4 has specs, so we have to have some indirection
+#         find_module = functools.partial(finder.find_spec, module_name)
+#         get_loader = operator.attrgetter('loader')
 
-    if not package:
-        result = find_module()
-    else:
-        # find our parent package
-        parent_package = package.rpartition('.')[-1]
-        # find its path
-        package_path = fixture.path.pypkgpath(parent_package)
-        # make sure we pass that to find_module
-        result = find_module(path=[str(package_path)])
+#     if not package:
+#         result = find_module()
+#     else:
+#         # find our parent package
+#         parent_package = package.rpartition('.')[-1]
+#         # find its path
+#         package_path = fixture.path.pypkgpath(parent_package)
+#         # make sure we pass that to find_module
+#         result = find_module(path=[str(package_path)])
 
-    if should_fail:
-        assert result is None
-    else:
-        loader = get_loader(result)
-        assert isinstance(loader, Loader)
+#     if should_fail:
+#         assert result is None
+#     else:
+#         loader = get_loader(result)
+#         assert isinstance(loader, Loader)
 
-        expected_no_ext = fixture.path.dirpath(fixture.path.purebasename)
+#         expected_no_ext = fixture.path.dirpath(fixture.path.purebasename)
 
-        actual_no_ext = py.path.local(loader.path)
-        actual_no_ext = actual_no_ext.dirpath(actual_no_ext.purebasename)
+#         actual_no_ext = py.path.local(loader.path)
+#         actual_no_ext = actual_no_ext.dirpath(actual_no_ext.purebasename)
 
-        assert actual_no_ext == expected_no_ext
-
-
-@C.only_py27
-def test_finder_package_py27(fixture_dir,
-                             module_finder,
-                             package,
-                             try_bytecode_then_python_loader):
-    _test_module_finder(fixture_dir,
-                        module_finder,
-                        package,
-                        try_bytecode_then_python_loader)
+#         assert actual_no_ext == expected_no_ext
 
 
-@C.only_py34
-def test_finder_package_pure_python_loader(fixture_dir,
-                                           module_finder,
-                                           package,
-                                           pure_python_loader):
-    _test_module_finder(fixture_dir,
-                        module_finder,
-                        package,
-                        pure_python_loader)
+# @C.only_py27
+# def test_finder_package_py27(fixture_dir,
+#                              module_finder,
+#                              package,
+#                              try_bytecode_then_python_loader):
+#     _test_module_finder(fixture_dir,
+#                         module_finder,
+#                         package,
+#                         try_bytecode_then_python_loader)
 
 
-def test_finder_no_py(fixture_dir,
-                      module_finder,
-                      no_py,
-                      bytecode_loader):
-    _test_module_finder(fixture_dir,
-                        module_finder,
-                        no_py,
-                        bytecode_loader)
+# @C.only_py34
+# def test_finder_package_pure_python_loader(fixture_dir,
+#                                            module_finder,
+#                                            package,
+#                                            pure_python_loader):
+#     _test_module_finder(fixture_dir,
+#                         module_finder,
+#                         package,
+#                         pure_python_loader)
 
 
-def test_finder_extension(fixture_dir,
-                          module_finder,
-                          extension_module,
-                          extension_loader):
-    _test_module_finder(fixture_dir,
-                        module_finder,
-                        extension_module,
-                        extension_loader)
+# def test_finder_no_py(fixture_dir,
+#                       module_finder,
+#                       no_py,
+#                       bytecode_loader):
+#     _test_module_finder(fixture_dir,
+#                         module_finder,
+#                         no_py,
+#                         bytecode_loader)
+
+
+# def test_finder_extension(fixture_dir,
+#                           module_finder,
+#                           extension_module,
+#                           extension_loader):
+#     _test_module_finder(fixture_dir,
+#                         module_finder,
+#                         extension_module,
+#                         extension_loader)

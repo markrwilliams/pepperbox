@@ -2,7 +2,6 @@ if __name__ == '__main__':
     import os
     import sys
     from setuptools import setup, find_packages
-    from pepperbox._ffi import ffi
 
     kwargs = {}
     if os.environ.get('INSTALL_CUSTOMIZE'):
@@ -15,8 +14,8 @@ if __name__ == '__main__':
           version='0.0.1',
           zip_safe=False,
           install_requires=requirements,
+          cffi_modules=['pepperbox/_binding_build.py:ffi'],
+          setup_requires=['cffi>=1.0.1'],
           include_package_data=True,
           packages=find_packages(),
-          ext_package='pepperbox',
-          ext_modules=[ffi.verifier.get_extension()],
           **kwargs)
